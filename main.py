@@ -87,13 +87,31 @@ class AffiliateBot:
         
         logger.info("Starting Affiliate Bot...")
         
-        # Start Telegram bot
-        await self.run_telegram_bot()
+        # Initialize both services
+        self.telegram_bot = TelegramBot(
+            self.config.TELEGRAM_BOT_TOKEN,
+            self.config.TELEGRAM_ADMIN_ID
+        )
+        self.telegram_bot.db = self.db
         
-        # Start auto-commenter
-        await self.run_auto_commenter()
+        # Run both concurrently using gather
+        # Telegram bot runs in main thread (required for signal handlers)
+        # Auto-commenter runs as async task
+        await asyncio.gather(
+            asyncio.create_task(self._run_auto_commenter_wrapper()),
+            asyncio.create_task(self._run_telegram_bot_wrapper())
+        )
         
         logger.info("Affiliate Bot stopped")
+    
+    async def _run_telegram_bot_wrapper(self):
+        """Wrapper to run telegram bot in executor"""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.telegram_bot.run)
+    
+    async def _run_auto_commenter_wrapper(self):
+        """Wrapper to run auto-commenter"""
+        await self.run_auto_commenter()
 
 
 def main():
