@@ -38,19 +38,6 @@ class AffiliateBot:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
     
-    async def run_telegram_bot(self):
-        """Run Telegram bot - runs polling in main event loop"""
-        self.telegram_bot = TelegramBot(
-            self.config.TELEGRAM_BOT_TOKEN,
-            self.config.TELEGRAM_ADMIN_ID
-        )
-        # Pass database reference to bot
-        self.telegram_bot.db = self.db
-        
-        # Run polling - this is blocking but runs in main thread
-        self.telegram_bot.run()
-        logger.info("Telegram bot stopped")
-    
     async def run_auto_commenter(self):
         """Run auto-commenter loop"""
         self.auto_commenter = AutoCommenter(
@@ -87,31 +74,24 @@ class AffiliateBot:
         
         logger.info("Starting Affiliate Bot...")
         
-        # Initialize both services
+        # Initialize Telegram bot
         self.telegram_bot = TelegramBot(
             self.config.TELEGRAM_BOT_TOKEN,
             self.config.TELEGRAM_ADMIN_ID
         )
         self.telegram_bot.db = self.db
         
-        # Run both concurrently using gather
-        # Telegram bot runs in main thread (required for signal handlers)
-        # Auto-commenter runs as async task
-        await asyncio.gather(
-            asyncio.create_task(self._run_auto_commenter_wrapper()),
-            asyncio.create_task(self._run_telegram_bot_wrapper())
-        )
+        # Start auto-commenter as background task
+        auto_commenter_task = asyncio.create_task(self.run_auto_commenter())
+        
+        # Run Telegram bot in main thread (blocking, handles signals)
+        # This will run until stopped, keeping the process alive
+        self.telegram_bot.run()
+        
+        # Cancel auto-commenter if still running
+        auto_commenter_task.cancel()
         
         logger.info("Affiliate Bot stopped")
-    
-    async def _run_telegram_bot_wrapper(self):
-        """Wrapper to run telegram bot in executor"""
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self.telegram_bot.run)
-    
-    async def _run_auto_commenter_wrapper(self):
-        """Wrapper to run auto-commenter"""
-        await self.run_auto_commenter()
 
 
 def main():
