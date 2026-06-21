@@ -43,6 +43,11 @@ class AffiliateBot:
         import threading
         
         def run_bot():
+            # Create event loop for this thread
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
             self.telegram_bot = TelegramBot(
                 self.config.TELEGRAM_BOT_TOKEN,
                 self.config.TELEGRAM_ADMIN_ID
