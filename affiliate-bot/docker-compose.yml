@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  affiliate-bot:
+    build: .
+    container_name: affiliate-bot
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_ADMIN_ID=${TELEGRAM_ADMIN_ID}
+      - AI_API_KEY=${AI_API_KEY}
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: bridge
