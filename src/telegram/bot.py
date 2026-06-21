@@ -104,7 +104,7 @@ class TelegramBot:
                 "Last check: Just now",
                 parse_mode='Markdown'
             )
-elif data == "statistik":
+        elif data == "statistik":
             # In production: fetch from database
             await query.edit_message_text(
                 f"📈 *Statistik Hari Ini*\n\n"
