@@ -39,26 +39,17 @@ class AffiliateBot:
         signal.signal(signal.SIGTERM, signal_handler)
     
     async def run_telegram_bot(self):
-        """Run Telegram bot in separate thread"""
-        import threading
+        """Run Telegram bot - runs polling in main event loop"""
+        self.telegram_bot = TelegramBot(
+            self.config.TELEGRAM_BOT_TOKEN,
+            self.config.TELEGRAM_ADMIN_ID
+        )
+        # Pass database reference to bot
+        self.telegram_bot.db = self.db
         
-        def run_bot():
-            # Create event loop for this thread
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            self.telegram_bot = TelegramBot(
-                self.config.TELEGRAM_BOT_TOKEN,
-                self.config.TELEGRAM_ADMIN_ID
-            )
-            # Pass database reference to bot
-            self.telegram_bot.db = self.db
-            self.telegram_bot.run()
-        
-        bot_thread = threading.Thread(target=run_bot, daemon=True)
-        bot_thread.start()
-        logger.info("Telegram bot started")
+        # Run polling - this is blocking but runs in main thread
+        self.telegram_bot.run()
+        logger.info("Telegram bot stopped")
     
     async def run_auto_commenter(self):
         """Run auto-commenter loop"""
