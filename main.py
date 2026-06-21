@@ -61,7 +61,6 @@ class AffiliateBot:
             db=self.db,
             cookie_manager=self.cookie_manager,
             classifier=self.classifier,
-            affiliate_link="https://shopee.co.id/your-affiliate-link",
             is_warm_mode=self.telegram_bot.is_warm_mode if self.telegram_bot else False,
             comment_delay=self.config.COMMENT_DELAY,
             warm_delay=self.config.WARM_MODE_DELAY

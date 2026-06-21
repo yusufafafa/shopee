@@ -1,0 +1,11 @@
+{
+  "comments_per_account_per_day": 20,
+  "max_comments_per_hour": 5,
+  "min_delay_seconds": 120,
+  "max_delay_seconds": 600,
+  "operating_start": 9,
+  "operating_end": 20,
+  "min_accounts_required": 5,
+  "auto_pause_on_block": true,
+  "pause_duration_minutes": 30
+}

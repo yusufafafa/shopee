@@ -2,7 +2,7 @@
 import asyncio
 from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from .handlers import (
     cmd_start, cmd_addaccount, cmd_checklogin,
@@ -105,7 +105,6 @@ class TelegramBot:
                 parse_mode='Markdown'
             )
         elif data == "statistik":
-            # In production: fetch from database
             await query.edit_message_text(
                 f"📈 *Statistik Hari Ini*\n\n"
                 f"Postingan discan: {self.stats['scanned']}\n"
@@ -472,26 +471,20 @@ class TelegramBot:
         self.application = Application.builder().token(self.token).build()
         
         # Add command handlers
-        self.application.add_handler(CommandHandler("start", cmd_start))
+        self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("addaccount", cmd_addaccount))
         self.application.add_handler(CommandHandler("checklogin", cmd_checklogin))
         self.application.add_handler(CommandHandler("status", cmd_status))
         self.application.add_handler(CommandHandler("statistik", cmd_statistik))
         self.application.add_handler(CommandHandler("trending", cmd_trending))
+        self.application.add_handler(CommandHandler("settings", cmd_settings))
         self.application.add_handler(CommandHandler("help", cmd_help))
         self.application.add_handler(CommandHandler("cancel", cmd_cancel))
-        
-        # Add message handler for cookies
-        self.application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            handle_cookie_message
-        ))
         
         # Add callback handler
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
         
         # Add conversation handler for keyword management
-        from telegram.ext import ConversationHandler, MessageHandler
         self.application.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND,
             self.handle_keyword_input

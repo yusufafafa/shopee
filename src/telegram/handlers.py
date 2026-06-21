@@ -179,6 +179,16 @@ async def cmd_set_account_age(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"❌ Error: {e}")
 
 
+async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /settings command"""
+    await update.message.reply_text(
+        "⚙️ *Bot Settings*\n\n"
+        "Gunakan menu di /start untuk mengubah pengaturan:\n"
+        "📊 Daily Limit, ⏱️ Delay, 🕐 Operating Hours, dll.",
+        parse_mode='Markdown'
+    )
+
+
 async def cmd_trending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /trending command - Show most searched products"""
     # In production: fetch from database
@@ -243,8 +253,10 @@ async def handle_cookie_message(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["account_count"] = account_count
     account_name = f"cookies{account_count}"
     
-    # In production: save to database here
-    # db.add_account(account_name, cookie_str)
+    # Save to database
+    from src.database.connection import Database
+    db = Database()
+    db.add_account(account_name, cookie_str)
     
     await update.message.reply_text(
         f"✅ *Akun berhasil ditambahkan!*\n\n"
