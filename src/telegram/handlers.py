@@ -30,12 +30,35 @@ async def cmd_checklogin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔍 *Memeriksa login...*\n\n"
         "Silakan tunggu, sedang mengecek semua akun."
     )
-    # In production: check all accounts with Facebook API
+    
+    # Get all accounts from database
+    from src.database.connection import Database
+    db = Database()
+    accounts = db.get_active_accounts()
+    
+    if not accounts:
+        await msg.edit_text(
+            "✅ *Hasil Check Login*\n\n"
+            "Belum ada akun terdaftar.\n\n"
+            "Kirim cookie Facebook untuk menambah akun:\n"
+            "`c_user=xxx;xs=xxx;fr=xxx;...`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Check each account status
+    account_list = []
+    for i, acc in enumerate(accounts):
+        today_stats = db.get_account_today_stats(acc.id)
+        if today_stats["is_blocked"]:
+            status = f"🚫 Blocked (sisa {today_stats.get('blocked_remaining', '12h')})"
+        else:
+            status = "✅ Aktif"
+        account_list.append(f"Akun {i+1}: {acc.name} - {status}")
+    
     await msg.edit_text(
         "✅ *Hasil Check Login*\n\n"
-        "Akun 1: ✅ Aktif\n"
-        "Akun 2: ✅ Aktif\n"
-        "Akun 3: 🚫 Blocked (sisa 12h)\n\n"
+        + "\n".join(account_list) + "\n\n"
         "/checklogin untuk cek ulang",
         parse_mode='Markdown'
     )
