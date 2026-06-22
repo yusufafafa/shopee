@@ -280,32 +280,10 @@ async def handle_cookie_message(update: Update, context: ContextTypes.DEFAULT_TY
     # Save to database
     db.add_account(account_name, cookie_str)
     
-await update.message.reply_text(
-        f"✅ *Akun berhasil ditambahkan!*\n\n"
-        f"Nama: `{account_name}`\n"
-        f"Status: 🟢 Aktif\n\n"
-        "Gunakan /checklogin untuk verifikasi.",
-        parse_mode='Markdown'
-    )
-        return
-    
-    # Extract cookie (handle both direct message and reply)
-    cookie_str = text.strip()
-    
-    # Generate account name
-    account_count = context.user_data.get("account_count", 0) + 1
-    context.user_data["account_count"] = account_count
-    account_name = f"cookies{account_count}"
-    
-    # Save to database
-    from src.database.connection import Database
-    db = Database()
-    db.add_account(account_name, cookie_str)
-    
     await update.message.reply_text(
         f"✅ *Akun berhasil ditambahkan!*\n\n"
         f"Nama: `{account_name}`\n"
-        "Status: 🟢 Aktif\n\n"
+        f"Status: 🟢 Aktif\n\n"
         "Gunakan /checklogin untuk verifikasi.",
         parse_mode='Markdown'
     )
