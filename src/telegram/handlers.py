@@ -214,42 +214,28 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_trending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /trending command - Show most searched products"""
-    # In production: fetch from database
-    # For now, show mock data
-    db = context.user_data.get('db')
+    from src.database.connection import Database
+    db = Database()
     
-    if db and hasattr(db, 'get_top_searched_keywords'):
-        top_keywords = db.get_top_searched_keywords(limit=10)
+    # Get top searched keywords from database
+    top_keywords = db.get_top_searched_keywords(limit=10)
+    
+    if top_keywords:
+        trending_list = "\n".join([
+            f"{i+1}. **{kw['keyword']}** - {kw['search_count']}x dicari"
+            for i, kw in enumerate(top_keywords)
+        ])
         
-        if top_keywords:
-            trending_list = "\n".join([
-                f"{i+1}. *{kw}** - {count}x dicari"
-                f"  (terakhir: {last_searched})"
-                for i, (kw, count, last_searched) in enumerate(top_keywords)
-            ])
-            
-            await update.message.reply_text(
-                f"🔥 *Produk Paling Sering Dicari*\n\n"
-                f"{trending_list}\n\n"
-                f"_Data real-time dari postingan Facebook_",
-                parse_mode='Markdown'
-            )
-        else:
-            await update.message.reply_text(
-                "📊 *Belum ada data pencarian*\n\n"
-                "Bot akan menampilkan produk yang paling sering dicari setelah ada postingan yang diproses.",
-                parse_mode='Markdown'
-            )
-    else:
-        # Mock data for testing
         await update.message.reply_text(
-            "🔥 *Produk Paling Sering Dicari (Hari Ini)*\n\n"
-            "1. **Kemeja** - 15x dicari\n"
-            "2. **Headphone** - 12x dicari\n"
-            "3. **Lampu** - 8x dicari\n"
-            "4. **Celana** - 7x dicari\n"
-            "5. **Sepatu** - 5x dicari\n\n"
-            "_Data real-time dari postingan Facebook_",
+            f"🔥 *Produk Paling Sering Dicari*\n\n"
+            f"{trending_list}\n\n"
+            f"_Data real-time dari postingan Facebook_",
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            "📊 *Belum ada data pencarian*\n\n"
+            "Bot akan menampilkan produk yang paling sering dicari setelah ada postingan yang diproses.",
             parse_mode='Markdown'
         )
 
