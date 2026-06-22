@@ -143,16 +143,27 @@ class AutoCommenter:
         
         return result
     
-    async def run_loop(self, keywords: List[str], ai_api_key: str = None):
+    async def run_loop(self, keywords: List[str], ai_api_key: str = None, is_auto_mode_check = None):
         """
         Main running loop for auto-commenter.
         Scans and processes posts continuously.
+        
+        Args:
+            keywords: List of keywords to search for
+            ai_api_key: OpenAI API key for AI filter
+            is_auto_mode_check: Optional callable that returns True if auto mode is ON
         """
         self.is_running = True
         logger.info("Auto-commenter started")
         
         while self.is_running:
             try:
+                # Check auto mode - if OFF, just wait and continue
+                if is_auto_mode_check and not is_auto_mode_check():
+                    logger.debug("Auto mode OFF, waiting...")
+                    await asyncio.sleep(30)  # Check every 30 seconds
+                    continue
+                
                 # Check operating hours
                 current_hour = datetime.now().hour
                 if not self.settings.is_within_operating_hours(current_hour):

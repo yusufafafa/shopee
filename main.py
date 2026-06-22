@@ -57,10 +57,14 @@ class AffiliateBot:
         # Get keywords from config
         keywords = self.config.BUYER_KEYWORDS
         
-        # Run auto-commenter
+        # Run auto-commenter with auto mode check
+        def check_auto_mode():
+            return self.telegram_bot.is_auto_mode if self.telegram_bot else False
+        
         await self.auto_commenter.run_loop(
             keywords=keywords,
-            ai_api_key=self.config.AI_API_KEY
+            ai_api_key=self.config.AI_API_KEY,
+            is_auto_mode_check=check_auto_mode
         )
     
     async def run(self):
