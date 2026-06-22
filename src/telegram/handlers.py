@@ -280,7 +280,7 @@ async def handle_cookie_message(update: Update, context: ContextTypes.DEFAULT_TY
     # Save to database
     db.add_account(account_name, cookie_str)
     
-    await update.message.reply_text(
+await update.message.reply_text(
         f"✅ *Akun berhasil ditambahkan!*\n\n"
         f"Nama: `{account_name}`\n"
         f"Status: 🟢 Aktif\n\n"
