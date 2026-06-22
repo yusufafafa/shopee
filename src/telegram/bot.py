@@ -9,6 +9,7 @@ from .handlers import (
     cmd_status, cmd_statistik, cmd_help, cmd_cancel, cmd_trending,
     cmd_settings, handle_cookie_message
 )
+from ..core.settings import SettingsManager
 
 
 class TelegramBot:
@@ -28,6 +29,7 @@ class TelegramBot:
             "ai_skip": 0
         }
         self.accounts = []  # List of Facebook accounts
+        self.settings = SettingsManager()
         
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
