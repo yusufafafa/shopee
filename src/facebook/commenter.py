@@ -160,7 +160,7 @@ class AutoCommenter:
             try:
                 # Check auto mode - if OFF, just wait and continue
                 if is_auto_mode_check and not is_auto_mode_check():
-                    logger.debug("Auto mode OFF, waiting...")
+                    logger.info("Auto mode OFF, waiting... (toggle Auto ON in Telegram to start scanning)")
                     await asyncio.sleep(30)  # Check every 30 seconds
                     continue
                 
