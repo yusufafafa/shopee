@@ -98,12 +98,42 @@ def main():
     """Main entry point"""
     app = AffiliateBot()
     
-    try:
-        asyncio.run(app.run())
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+    if not app.config.validate():
+        logger.error("Configuration validation failed!")
+        return
+    
+    app.is_running = True
+    app.setup_signal_handlers()
+    
+    logger.info("Starting Affiliate Bot...")
+    
+    # Initialize Telegram bot
+    app.telegram_bot = TelegramBot(
+        app.config.TELEGRAM_BOT_TOKEN,
+        app.config.TELEGRAM_ADMIN_ID
+    )
+    app.telegram_bot.db = app.db
+    
+    # Run auto-commenter in separate thread
+    import threading
+    def run_auto_commenter_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(app.run_auto_commenter())
+        except asyncio.CancelledError:
+            pass
+        finally:
+            loop.close()
+    
+    auto_thread = threading.Thread(target=run_auto_commenter_thread, daemon=True)
+    auto_thread.start()
+    logger.info("Auto-commenter started in background")
+    
+    # Run Telegram bot in main thread (blocking)
+    app.telegram_bot.run()
+    
+    logger.info("Affiliate Bot stopped")
 
 
 if __name__ == "__main__":
