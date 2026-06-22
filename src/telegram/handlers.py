@@ -254,6 +254,41 @@ async def handle_cookie_message(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
     
+    # Extract cookie
+    cookie_str = text.strip()
+    
+    # Check if cookie already exists in database
+    from src.database.connection import Database
+    db = Database()
+    existing_accounts = db.get_active_accounts()
+    
+    for acc in existing_accounts:
+        if acc.cookie == cookie_str:
+            await update.message.reply_text(
+                f"ℹ️ *Akun sudah terdaftar!*\n\n"
+                f"Nama: `{acc.name}`\n"
+                f"Status: {'✅ Aktif' if acc.active else '🚫 Nonaktif'}\n\n"
+                "Tidak perlu tambah ulang.",
+                parse_mode='Markdown'
+            )
+            return
+    
+    # Generate account name
+    account_count = len(existing_accounts) + 1
+    account_name = f"cookies{account_count}"
+    
+    # Save to database
+    db.add_account(account_name, cookie_str)
+    
+    await update.message.reply_text(
+        f"✅ *Akun berhasil ditambahkan!*\n\n"
+        f"Nama: `{account_name}`\n"
+        f"Status: 🟢 Aktif\n\n"
+        "Gunakan /checklogin untuk verifikasi.",
+        parse_mode='Markdown'
+    )
+        return
+    
     # Extract cookie (handle both direct message and reply)
     cookie_str = text.strip()
     
