@@ -158,11 +158,15 @@ class AutoCommenter:
         
         while self.is_running:
             try:
+                logger.info("DEBUG: Starting loop iteration")
+                
                 # Check auto mode - if OFF, just wait and continue
                 if is_auto_mode_check and not is_auto_mode_check():
                     logger.info("Auto mode OFF, waiting... (toggle Auto ON in Telegram to start scanning)")
                     await asyncio.sleep(30)  # Check every 30 seconds
                     continue
+                
+                logger.info("DEBUG: Auto mode ON, checking operating hours")
                 
                 # Check operating hours
                 current_hour = datetime.now().hour
@@ -171,12 +175,16 @@ class AutoCommenter:
                     await asyncio.sleep(300)  # Wait 5 minutes
                     continue
                 
+                logger.info("DEBUG: Within operating hours, checking accounts")
+                
                 # Get active accounts
                 active_accounts = self.db.get_active_accounts()
                 if not active_accounts:
                     logger.warning("No active accounts, waiting...")
                     await asyncio.sleep(60)
                     continue
+                
+                logger.info(f"DEBUG: Found {len(active_accounts)} active accounts")
                 
                 # Update cookie manager
                 for account in active_accounts:
