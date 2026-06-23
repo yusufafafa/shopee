@@ -60,7 +60,9 @@ class AffiliateBot:
         # Run auto-commenter with auto mode check from DATABASE
         def check_auto_mode():
             # Read from database instead of memory to avoid race condition
-            return self.db.get_bot_setting('is_auto_mode', 'false') == 'true'
+            result = self.db.get_bot_setting('is_auto_mode', 'false') == 'true'
+            logger.info(f"DEBUG: check_auto_mode() called, result={result}, db_value={self.db.get_bot_setting('is_auto_mode', 'false')}")
+            return result
         
         await self.auto_commenter.run_loop(
             keywords=keywords,
