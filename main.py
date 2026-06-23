@@ -57,9 +57,10 @@ class AffiliateBot:
         # Get keywords from config
         keywords = self.config.BUYER_KEYWORDS
         
-        # Run auto-commenter with auto mode check
+        # Run auto-commenter with auto mode check from DATABASE
         def check_auto_mode():
-            return self.telegram_bot.is_auto_mode if self.telegram_bot else False
+            # Read from database instead of memory to avoid race condition
+            return self.db.get_bot_setting('is_auto_mode', 'false') == 'true'
         
         await self.auto_commenter.run_loop(
             keywords=keywords,
@@ -117,6 +118,12 @@ def main():
         app.config.TELEGRAM_ADMIN_ID
     )
     app.telegram_bot.db = app.db
+    
+    # Load saved settings from database
+    app.telegram_bot.is_auto_mode = app.db.get_bot_setting('is_auto_mode', 'false') == 'true'
+    app.telegram_bot.is_warm_mode = app.db.get_bot_setting('is_warm_mode', 'false') == 'true'
+    
+    logger.info(f"Loaded settings: Auto={app.telegram_bot.is_auto_mode}, Warm={app.telegram_bot.is_warm_mode}")
     
     # Run auto-commenter in separate thread
     import threading

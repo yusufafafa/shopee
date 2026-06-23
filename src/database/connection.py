@@ -138,6 +138,25 @@ class Database:
             )
         """)
         
+        # Bot settings table (for global settings like is_auto_mode)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Insert default bot settings
+        cursor.execute("""
+            INSERT OR IGNORE INTO bot_settings (key, value)
+            VALUES ('is_auto_mode', 'false')
+        """)
+        cursor.execute("""
+            INSERT OR IGNORE INTO bot_settings (key, value)
+            VALUES ('is_warm_mode', 'false')
+        """)
+        
         # Insert default keywords
         default_keywords = [
             "mau beli", "cari", "nyari", "butuh", "perlu",
@@ -700,5 +719,30 @@ class Database:
             SET is_blocked = 0, blocked_until = NULL
             WHERE account_id = ? AND date = ?
         """, (account_id, today))
+        conn.commit()
+        conn.close()
+    
+    # Global bot settings
+    def get_bot_setting(self, key: str, default: str = None) -> Optional[str]:
+        """Get bot setting by key"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT value FROM bot_settings WHERE key = ?",
+            (key,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return row["value"] if row else default
+    
+    def set_bot_setting(self, key: str, value: str):
+        """Set bot setting"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO bot_settings (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = ?
+        """, (key, value, value))
         conn.commit()
         conn.close()

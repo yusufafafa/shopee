@@ -30,6 +30,7 @@ class TelegramBot:
         }
         self.accounts = []  # List of Facebook accounts
         self.settings = SettingsManager()
+        self.db = None  # Database reference for shared state
         
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
@@ -83,11 +84,17 @@ class TelegramBot:
         
         if data == "toggle_auto":
             self.is_auto_mode = not self.is_auto_mode
+            # Save to database for auto-commenter to read
+            if hasattr(self, 'db'):
+                self.db.set_bot_setting('is_auto_mode', str(self.is_auto_mode).lower())
             await query.edit_message_text(
                 f"Auto mode: {'✅ ON' if self.is_auto_mode else '❌ OFF'}"
             )
         elif data == "toggle_warm":
             self.is_warm_mode = not self.is_warm_mode
+            # Save to database
+            if hasattr(self, 'db'):
+                self.db.set_bot_setting('is_warm_mode', str(self.is_warm_mode).lower())
             await query.edit_message_text(
                 f"Warm mode: {'🔥 ON' if self.is_warm_mode else '❌ OFF'}"
             )
@@ -196,13 +203,13 @@ class TelegramBot:
                     parse_mode='Markdown'
                 )
         elif data == "keywords":
-            # Get keywords from config (hardcoded for now, will move to DB later)
-            keywords = [
-                "mau beli", "cari", "nyari", "butuh", "perlu",
-                "rekomendasi", "suggest", "mohon saran"
-            ]
+            # Get keywords from database
+            keywords = self.db.get_all_keywords() if hasattr(self, 'db') else []
             
-            keyword_list = "\n".join([f"{i+1}. {kw}" for i, kw in enumerate(keywords)])
+            if keywords:
+                keyword_list = "\n".join([f"{i+1}. {kw.keyword}" for i, kw in enumerate(keywords)])
+            else:
+                keyword_list = "Belum ada keyword."
             
             keyboard = [
                 [InlineKeyboardButton("➕ Tambah Keyword", callback_data="keyword_add")],
@@ -229,21 +236,24 @@ class TelegramBot:
                 parse_mode='Markdown'
             )
         elif data == "keyword_remove":
-            keywords = [
-                "mau beli", "cari", "nyari", "butuh", "perlu",
-                "rekomendasi", "suggest", "mohon saran"
-            ]
+            keywords = self.db.get_all_keywords() if hasattr(self, 'db') else []
             
-            keyword_list = "\n".join([f"{i+1}. {kw}" for i, kw in enumerate(keywords)])
-            
-            await query.edit_message_text(
-                f"➖ *Hapus Keyword*\n\n"
-                f"Ketik **nomor** keyword yang mau dihapus:\n\n"
-                f"{keyword_list}\n\n"
-                "Contoh: ketik `3` untuk hapus 'nyari'\n\n"
-                "Ketik /cancel untuk batal.",
-                parse_mode='Markdown'
-            )
+            if keywords:
+                keyword_list = "\n".join([f"{i+1}. {kw.keyword}" for i, kw in enumerate(keywords)])
+                
+                await query.edit_message_text(
+                    f"➖ *Hapus Keyword*\n\n"
+                    f"Ketik **nomor** keyword yang mau dihapus:\n\n"
+                    f"{keyword_list}\n\n"
+                    "Contoh: ketik `3` untuk hapus 'nyari'\n\n"
+                    "Ketik /cancel untuk batal.",
+                    parse_mode='Markdown'
+                )
+            else:
+                await query.edit_message_text(
+                    "❌ Belum ada keyword untuk dihapus.",
+                    parse_mode='Markdown'
+                )
         elif data == "templates":
             await query.edit_message_text(
                 "📝 *Template Komentar*\n\n"
