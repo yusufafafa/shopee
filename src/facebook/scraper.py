@@ -13,8 +13,8 @@ class FacebookScraper:
     
     def __init__(self, cookie: str):
         self.cookie = cookie
-        # Use mbasic.facebook.com (Facebook Basic - most stable for scraping)
-        self.base_url = "https://mbasic.facebook.com"
+        # Use m.facebook.com (mobile version)
+        self.base_url = "https://m.facebook.com"
         self.session = None
     
     async def _get_session(self):
@@ -53,13 +53,10 @@ class FacebookScraper:
                 cookies[key.strip()] = value.strip()
         return cookies
     
-    async def search_posts(self, keywords: List[str], limit: int = 10) -> List[Dict]:
+async def search_posts(self, keywords: List[str], limit: int = 10) -> List[Dict]:
         """
         Search for posts containing keywords.
         Returns list of posts with: author, content, url, timestamp
-        
-        Note: Facebook mobile search may require login first.
-        If search fails, try navigating to facebook.com first to establish session.
         """
         posts = []
         session = await self._get_session()
@@ -68,35 +65,37 @@ class FacebookScraper:
         
         for keyword in keywords:
             try:
-# First, visit Facebook homepage to ensure session is active
-                async with session.get("https://mbasic.facebook.com") as home_response:
+                # First, visit Facebook homepage to ensure session is active
+                async with session.get("https://m.facebook.com") as home_response:
+                    logger.info(f"Facebook homepage status: {home_response.status}")
                     if home_response.status != 200:
                         logger.error(f"Failed to access Facebook homepage: {home_response.status}")
                         continue
-                    logger.debug(f"Facebook homepage: HTTP {home_response.status}")
                 
-                # Search URL for mbasic Facebook (simpler HTML structure)
+                # Search URL for mobile Facebook
                 from urllib.parse import quote
                 encoded_keyword = quote(keyword)
                 search_url = f"{self.base_url}/search/posts/?q={encoded_keyword}"
                 
-                logger.debug(f"Searching: {search_url}")
+                logger.info(f"Searching: {search_url}")
                 
                 async with session.get(search_url) as response:
+                    logger.info(f"Search response: HTTP {response.status}, URL: {response.url}")
+                    
                     if response.status != 200:
                         logger.error(f"Search failed for '{keyword}': HTTP {response.status}")
                         continue
                     
                     html = await response.text()
-                    logger.debug(f"Search response: {len(html)} bytes, status={response.status}, url={response.url}")
+                    logger.info(f"Response HTML length: {len(html)} bytes")
                     
                     # Check if redirected to login page
                     if "login" in response.url.path.lower() or "log in" in html.lower():
                         logger.error(f"Session expired or invalid for '{keyword}'. Need to re-authenticate.")
                         continue
                     
-                    # Save HTML for debugging
-                    logger.debug(f"First 500 chars of HTML: {html[:500]}")
+                    # Log first 1000 chars for debugging
+                    logger.info(f"HTML preview: {html[:1000]}")
                     
                     parsed_posts = self._parse_search_results(html, keyword)
                     logger.info(f"Found {len(parsed_posts)} posts for keyword '{keyword}'")

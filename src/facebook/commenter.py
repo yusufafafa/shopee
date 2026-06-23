@@ -3,7 +3,7 @@ import asyncio
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 
-from .scraper import FacebookScraper
+from .scraper_playwright import FacebookScraper
 from .cookies import CookieManager
 from ..ai_filter.classifier import TextClassifier
 from ..ai_filter.prompts import get_comment_template
