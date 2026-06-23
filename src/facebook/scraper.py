@@ -184,15 +184,6 @@ async def search_posts(self, keywords: List[str], limit: int = 10) -> List[Dict]
         
         logger.info(f"Parsed {len(posts)} valid posts from HTML")
         return posts
-                        "url": url,
-                        "timestamp": timestamp,
-                        "keyword": keyword
-                    })
-            
-            except Exception as e:
-                print(f"Error parsing post: {e}")
-        
-        return posts
     
     async def post_comment(self, post_url: str, comment_text: str) -> bool:
         """
