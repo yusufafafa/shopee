@@ -13,8 +13,8 @@ class FacebookScraper:
     
     def __init__(self, cookie: str):
         self.cookie = cookie
-        # Use m.facebook.com (mobile version, still active)
-        self.base_url = "https://m.facebook.com"
+        # Use mbasic.facebook.com (Facebook Basic - most stable for scraping)
+        self.base_url = "https://mbasic.facebook.com"
         self.session = None
     
     async def _get_session(self):
@@ -68,15 +68,14 @@ class FacebookScraper:
         
         for keyword in keywords:
             try:
-                # First, visit Facebook homepage to ensure session is active
-                async with session.get("https://m.facebook.com") as home_response:
+# First, visit Facebook homepage to ensure session is active
+                async with session.get("https://mbasic.facebook.com") as home_response:
                     if home_response.status != 200:
                         logger.error(f"Failed to access Facebook homepage: {home_response.status}")
                         continue
                     logger.debug(f"Facebook homepage: HTTP {home_response.status}")
                 
-                # Search URL for mobile Facebook
-                # Use encoded keyword for URL
+                # Search URL for mbasic Facebook (simpler HTML structure)
                 from urllib.parse import quote
                 encoded_keyword = quote(keyword)
                 search_url = f"{self.base_url}/search/posts/?q={encoded_keyword}"
@@ -89,12 +88,15 @@ class FacebookScraper:
                         continue
                     
                     html = await response.text()
-                    logger.debug(f"Search response: {len(html)} bytes, status={response.status}")
+                    logger.debug(f"Search response: {len(html)} bytes, status={response.status}, url={response.url}")
                     
                     # Check if redirected to login page
                     if "login" in response.url.path.lower() or "log in" in html.lower():
                         logger.error(f"Session expired or invalid for '{keyword}'. Need to re-authenticate.")
                         continue
+                    
+                    # Save HTML for debugging
+                    logger.debug(f"First 500 chars of HTML: {html[:500]}")
                     
                     parsed_posts = self._parse_search_results(html, keyword)
                     logger.info(f"Found {len(parsed_posts)} posts for keyword '{keyword}'")
@@ -107,105 +109,82 @@ class FacebookScraper:
         return posts
     
     def _parse_search_results(self, html: str, keyword: str) -> List[Dict]:
-        """Parse HTML search results from mobile Facebook"""
+        """Parse HTML search results from mbasic Facebook"""
         posts = []
         
-        # Mobile Facebook uses different structure than mbasic
-        # Look for post articles with data-ft or role="article"
+        logger.debug(f"Parsing search results for '{keyword}', HTML length: {len(html)}")
         
-        # Pattern 1: Article tags
-        post_pattern = r'<article[^>]*>(.*?)</article>'
+        # mbasic Facebook uses simple table/div structure
+        # Each post is typically in a <div> or <table> with specific patterns
+        
+        # Look for post containers - mbasic uses simple divs
+        # Pattern: look for posts with author links
+        post_pattern = r'<div[^>]*id=["\']mbasic_[^>]*>(.*?)</div>'
         post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
         
-        # Pattern 2: If no articles found, try div with role="article"
+        # Fallback: try finding posts by looking for profile links
         if not post_matches:
-            post_pattern = r'<div[^>]*role=["\']article["\'][^>]*>(.*?)</div>'
+            # mbasic typically has posts with profile.php links
+            post_pattern = r'(<a[^>]*profile\.php[^>]*>.*?</a>.*?(?:</div>|<br[^>]*>))'
             post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
         
-        # Pattern 3: Fallback - look for story containers
-        if not post_matches:
-            post_pattern = r'<div[^>]*data-ft[^>]*>(.*?)</div>'
-            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        logger.debug(f"Found {len(post_matches)} potential post containers")
         
         for post_html in post_matches:
             try:
-                # Extract author - mobile Facebook uses various patterns
+                # Extract author - mbasic uses simple <a> tags
                 author = "Unknown"
-                
-                # Try multiple author patterns
-                author_patterns = [
-                    r'<a[^>]*href=["\']/[^/]+/profile\.php\?id=\d+[^>]*>([^<]+)</a>',
-                    r'<a[^>]*href=["\']/[^/]+/([^/]+)/["\'][^>]*>([^<]+)</a>',
-                    r'<strong[^>]*>([^<]+)</strong>',
-                    r'<span[^>]*class=["\'][^>\']*author[^>\']*["\'][^>]*>([^<]+)</span>',
-                ]
-                
-                for pattern in author_patterns:
-                    author_match = re.search(pattern, post_html, re.IGNORECASE)
+                author_match = re.search(r'<a[^>]*href=["\'][^/]*profile\.php\?id=\d+[^>]*>([^<]+)</a>', post_html, re.IGNORECASE)
+                if author_match:
+                    author = author_match.group(1).strip()
+                else:
+                    # Try alternative author pattern
+                    author_match = re.search(r'<a[^>]*href=["\'][^>]*>([^<]{2,50})</a>', post_html, re.IGNORECASE)
                     if author_match:
-                        # Get the last match (usually the author name)
-                        groups = author_match.groups()
-                        author = groups[-1].strip() if groups else "Unknown"
-                        break
+                        author = author_match.group(1).strip()
                 
-                # Extract content - look for post text
+                # Extract content - mbasic uses simple text in divs/spans
                 content = ""
-                content_patterns = [
-                    r'<p[^>]*>(.*?)</p>',
-                    r'<span[^>]*>(.*?)</span>',
-                    r'<div[^>]*class=["\'][^>\']*post-message[^>\']*["\'][^>]*>(.*?)</div>',
-                    r'<div[^>]*data-story-subtitle[^>]*>(.*?)</div>',
-                ]
-                
-                for pattern in content_patterns:
-                    content_match = re.search(pattern, post_html, re.DOTALL | re.IGNORECASE)
-                    if content_match:
-                        # Strip HTML tags from content
-                        content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
-                        if content:
-                            break
+                # Look for text content after author link
+                content_match = re.search(r'</a>[^>]*>([^<]{20,500})', post_html, re.IGNORECASE)
+                if content_match:
+                    content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
+                    # Clean up HTML entities
+                    content = content.replace('"', '"').replace('&', '&').replace('<', '<').replace('>', '>')
                 
                 # Extract post URL
                 url = ""
-                url_patterns = [
-                    r'href=["\'](/story\.php\?[^"\']+)["\']',
-                    r'href=["\'](/[^/]+/posts/[^"\']+)["\']',
-                    r'href=["\'](/[^/]+/videos/[^"\']+)["\']',
-                    r'href=["\'](https://m\.facebook\.com/story\.php\?[^"\']+)["\']',
-                ]
-                
-                for pattern in url_patterns:
-                    url_match = re.search(pattern, post_html, re.IGNORECASE)
+                url_match = re.search(r'href=["\'](/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
+                if url_match:
+                    url = f"{self.base_url}{url_match.group(1)}"
+                else:
+                    # Try alternative URL pattern
+                    url_match = re.search(r'href=["\'](https?://[^"\']*facebook\.com/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
                     if url_match:
-                        url_path = url_match.group(1)
-                        if not url_path.startswith("http"):
-                            url = f"{self.base_url}{url_path}"
-                        else:
-                            url = url_path
-                        break
+                        url = url_match.group(1)
                 
                 # Extract timestamp
                 timestamp = "Unknown"
-                time_patterns = [
-                    r'<abbr[^>]*>(.*?)</abbr>',
-                    r'<span[^>]*class=["\'][^>\']*timestamp[^>\']*["\'][^>]*>([^<]+)</span>',
-                    r'<span[^>]*>(\d+[hdwm][s]? ago[^<]*)</span>',
-                ]
-                
-                for pattern in time_patterns:
-                    time_match = re.search(pattern, post_html, re.IGNORECASE)
-                    if time_match:
-                        timestamp = re.sub(r'<[^>]+>', '', time_match.group(1)).strip()
-                        break
+                time_match = re.search(r'(\d+\s*[hdwm]\s*ago|\d+\s*jam\s*yang\s*lalu|\d+\s*menit\s*yang\s*lalu)', post_html, re.IGNORECASE)
+                if time_match:
+                    timestamp = time_match.group(1).strip()
                 
                 # Only add if we have meaningful content
-                if content and url:
-                    # Clean up content (remove extra whitespace, emojis, etc.)
-                    content = ' '.join(content.split())
-                    
+                if content and url and len(content) > 10:
                     posts.append({
                         "author": author,
                         "content": content,
+                        "url": url,
+                        "timestamp": timestamp,
+                        "keyword": keyword
+                    })
+            
+            except Exception as e:
+                logger.error(f"Error parsing post: {e}")
+                continue
+        
+        logger.info(f"Parsed {len(posts)} valid posts from HTML")
+        return posts
                         "url": url,
                         "timestamp": timestamp,
                         "keyword": keyword
