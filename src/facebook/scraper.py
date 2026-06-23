@@ -3,6 +3,9 @@ import asyncio
 import re
 from typing import List, Dict, Optional
 from datetime import datetime
+from ..core.logger import setup_logger
+
+logger = setup_logger("FacebookScraper")
 
 
 class FacebookScraper:
@@ -61,13 +64,16 @@ class FacebookScraper:
         posts = []
         session = await self._get_session()
         
+        logger.info(f"Searching for posts with keywords: {keywords}")
+        
         for keyword in keywords:
             try:
                 # First, visit Facebook homepage to ensure session is active
                 async with session.get("https://m.facebook.com") as home_response:
                     if home_response.status != 200:
-                        print(f"Failed to access Facebook homepage: {home_response.status}")
+                        logger.error(f"Failed to access Facebook homepage: {home_response.status}")
                         continue
+                    logger.debug(f"Facebook homepage: HTTP {home_response.status}")
                 
                 # Search URL for mobile Facebook
                 # Use encoded keyword for URL
@@ -75,24 +81,29 @@ class FacebookScraper:
                 encoded_keyword = quote(keyword)
                 search_url = f"{self.base_url}/search/posts/?q={encoded_keyword}"
                 
+                logger.debug(f"Searching: {search_url}")
+                
                 async with session.get(search_url) as response:
                     if response.status != 200:
-                        print(f"Search failed for '{keyword}': HTTP {response.status}")
+                        logger.error(f"Search failed for '{keyword}': HTTP {response.status}")
                         continue
                     
                     html = await response.text()
+                    logger.debug(f"Search response: {len(html)} bytes, status={response.status}")
                     
                     # Check if redirected to login page
                     if "login" in response.url.path.lower() or "log in" in html.lower():
-                        print(f"Session expired or invalid. Need to re-authenticate.")
+                        logger.error(f"Session expired or invalid for '{keyword}'. Need to re-authenticate.")
                         continue
                     
                     parsed_posts = self._parse_search_results(html, keyword)
+                    logger.info(f"Found {len(parsed_posts)} posts for keyword '{keyword}'")
                     posts.extend(parsed_posts[:limit])
             
             except Exception as e:
-                print(f"Error searching '{keyword}': {e}")
+                logger.error(f"Error searching '{keyword}': {e}", exc_info=True)
         
+        logger.info(f"Total posts found: {len(posts)}")
         return posts
     
     def _parse_search_results(self, html: str, keyword: str) -> List[Dict]:
