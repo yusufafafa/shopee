@@ -132,13 +132,23 @@ class TelegramBot:
                 parse_mode='Markdown'
             )
         elif data == "akun_fb":
+            # Load accounts from database
+            accounts = []
+            if hasattr(self, 'db') and self.db:
+                db_accounts = self.db.get_all_accounts()
+                accounts = [{
+                    'name': acc.name,
+                    'active': acc.is_active and not acc.is_blocked,
+                    'status': acc.get_status()
+                } for acc in db_accounts]
+            
             account_list = "\n".join([
                 f"{i+1}. {acc['name']} {'✅' if acc['active'] else '🚫'} — {acc['status']}"
-                for i, acc in enumerate(self.accounts)
+                for i, acc in enumerate(accounts)
             ]) or "Belum ada akun terdaftar."
             
             await query.edit_message_text(
-                f"👥 *Daftar Akun ({len(self.accounts)} total)*\n\n"
+                f"👥 *Daftar Akun ({len(accounts)} total)*\n\n"
                 f"{account_list}\n\n"
                 "/checklogin untuk cek ulang",
                 parse_mode='Markdown'
@@ -260,6 +270,39 @@ class TelegramBot:
                 "1. \"Ada nih kak, cek dulu 🔗 {link}\"\n"
                 "2. \"Sebelum beli, cek ini dulu kak: {link} 🙏\"\n"
                 "3. \"Coba lihat di sini kak: {link}\"",
+                parse_mode='Markdown'
+            )
+        elif data == "set_daily_limit":
+            await query.edit_message_text(
+                "📊 *Set Daily Limit*\n\n"
+                "Ketik: `/setaccountlimit [id] [limit]`\n\n"
+                "Contoh: `/setaccountlimit 1 50`\n\n"
+                "Atau gunakan /checklogin untuk melihat ID akun.",
+                parse_mode='Markdown'
+            )
+        elif data == "set_min_delay":
+            await query.edit_message_text(
+                "⏱️ *Set Minimum Delay*\n\n"
+                "Delay minimum antara comment (dalam detik).\n\n"
+                "Edit di `src/core/settings.py` atau via environment variable:\n"
+                "`MIN_DELAY_SECONDS=120`",
+                parse_mode='Markdown'
+            )
+        elif data == "set_max_delay":
+            await query.edit_message_text(
+                "⏱️ *Set Maximum Delay*\n\n"
+                "Delay maximum antara comment (dalam detik).\n\n"
+                "Edit di `src/core/settings.py` atau via environment variable:\n"
+                "`MAX_DELAY_SECONDS=600`",
+                parse_mode='Markdown'
+            )
+        elif data == "set_operating_hours":
+            await query.edit_message_text(
+                "🕐 *Operating Hours*\n\n"
+                "Jam operasional bot (format 24 jam).\n\n"
+                "Edit di `src/core/settings.py`:\n"
+                "`OPERATING_START=9`\n"
+                "`OPERATING_END=20`",
                 parse_mode='Markdown'
             )
         elif data == "settings":
