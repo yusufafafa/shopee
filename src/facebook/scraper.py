@@ -47,56 +47,121 @@ class FacebookScraper:
                 cookies[key.strip()] = value.strip()
         return cookies
     
-    async def search_posts(self, keywords: List[str], limit: int = 10) -> List[Dict]:
-        """Search for posts containing keywords"""
+    async def scrape_group_feed(self, group_url: str, limit: int = 20) -> List[Dict]:
+        """Scrape posts from a Facebook group feed"""
         posts = []
         session = await self._get_session()
         
-        logger.info(f"Searching for posts with keywords: {keywords}")
+        logger.info(f"Scraping group: {group_url}")
         
-        for keyword in keywords:
+        try:
+            # Normalize group URL to mobile
+            if "www.facebook.com" in group_url:
+                group_url = group_url.replace("www.facebook.com", "m.facebook.com")
+            elif "facebook.com" in group_url and "m.facebook.com" not in group_url:
+                group_url = group_url.replace("facebook.com", "m.facebook.com")
+            
+            logger.info(f"Normalized URL: {group_url}")
+            
+            async with session.get(group_url) as response:
+                logger.info(f"Group response: HTTP {response.status}")
+                
+                if response.status != 200:
+                    logger.error(f"Failed to access group: HTTP {response.status}")
+                    return posts
+                
+                html = await response.text()
+                logger.info(f"Group HTML length: {len(html)} bytes")
+                
+                # Check login
+                if "login" in response.url.path.lower():
+                    logger.error("Redirected to login - session invalid")
+                    return posts
+                
+                # Parse posts
+                parsed_posts = self._parse_group_feed(html, group_url)
+                logger.info(f"Found {len(parsed_posts)} posts in group")
+                posts.extend(parsed_posts[:limit])
+        
+        except Exception as e:
+            logger.error(f"Error scraping group {group_url}: {e}", exc_info=True)
+        
+        return posts
+    
+    def _parse_group_feed(self, html: str, group_url: str) -> List[Dict]:
+        """Parse posts from group feed"""
+        posts = []
+        logger.debug(f"Parsing group feed, HTML length: {len(html)}")
+        
+        # Preview HTML
+        logger.info(f"Group HTML preview: {html[:500]}")
+        
+        # Look for posts in group - groups use article or div with data-ft
+        post_pattern = r'<article[^>]*>(.*?)</article>'
+        post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        # Fallback: look for div with role="article"
+        if not post_matches:
+            post_pattern = r'<div[^>]*role=["\']article["\'][^>]*>(.*?)</div>'
+            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        # Fallback: look for posts with profile links
+        if not post_matches:
+            post_pattern = r'(<a[^>]*profile\.php[^>]*>.*?</a>.*?(?:</div>|<br[^>]*>))'
+            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        logger.debug(f"Found {len(post_matches)} potential posts in group")
+        
+        for post_html in post_matches:
             try:
-                # Visit Facebook homepage
-                async with session.get("https://m.facebook.com") as home_response:
-                    logger.info(f"Facebook homepage: HTTP {home_response.status}")
-                    if home_response.status != 200:
-                        logger.error(f"Failed to access Facebook: {home_response.status}")
-                        continue
+                # Author
+                author = "Unknown"
+                author_match = re.search(r'<a[^>]*href=["\'][^/]*profile\.php\?id=\d+[^>]*>([^<]+)</a>', post_html, re.IGNORECASE)
+                if author_match:
+                    author = author_match.group(1).strip()
                 
-                # Search
-                from urllib.parse import quote
-                encoded_keyword = quote(keyword)
-                search_url = f"{self.base_url}/search/posts/?q={encoded_keyword}"
+                # Content
+                content = ""
+                content_match = re.search(r'</a>[^>]*>([^<]{20,500})', post_html, re.IGNORECASE)
+                if content_match:
+                    content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
+                    content = content.replace('"', '"').replace('&', '&')
                 
-                logger.info(f"Searching: {search_url}")
+                # URL
+                url = ""
+                url_match = re.search(r'href=["\'](/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
+                if url_match:
+                    url = f"{self.base_url}{url_match.group(1)}"
                 
-                async with session.get(search_url) as response:
-                    logger.info(f"Search response: HTTP {response.status}, URL: {response.url}")
-                    
-                    if response.status != 200:
-                        logger.error(f"Search failed: HTTP {response.status}")
-                        continue
-                    
-                    html = await response.text()
-                    logger.info(f"HTML length: {len(html)} bytes")
-                    
-                    # Check login
-                    if "login" in response.url.path.lower() or "log in" in html.lower():
-                        logger.error("Session expired. Need re-authenticate.")
-                        continue
-                    
-                    # Preview HTML
-                    logger.info(f"HTML preview: {html[:500]}")
-                    
-                    parsed_posts = self._parse_search_results(html, keyword)
-                    logger.info(f"Found {len(parsed_posts)} posts for '{keyword}'")
-                    posts.extend(parsed_posts[:limit])
+                # Timestamp
+                timestamp = "Unknown"
+                time_match = re.search(r'(\d+\s*[hdwm]\s*ago|\d+\s*jam\s*yang\s*lalu)', post_html, re.IGNORECASE)
+                if time_match:
+                    timestamp = time_match.group(1).strip()
+                
+                # Add if valid
+                if content and url and len(content) > 10:
+                    posts.append({
+                        "author": author,
+                        "content": content,
+                        "url": url,
+                        "timestamp": timestamp,
+                        "source": "group",
+                        "group_url": group_url
+                    })
             
             except Exception as e:
-                logger.error(f"Error searching '{keyword}': {e}", exc_info=True)
+                logger.error(f"Error parsing group post: {e}")
+                continue
         
-        logger.info(f"Total posts found: {len(posts)}")
+        logger.info(f"Parsed {len(posts)} valid posts from group")
         return posts
+    
+    async def search_posts(self, keywords: List[str], limit: int = 10) -> List[Dict]:
+        """Search for posts containing keywords (deprecated, use scrape_group_feed instead)"""
+        # Legacy method - return empty
+        logger.warning("search_posts() is deprecated. Use scrape_group_feed() instead.")
+        return []
     
     def _parse_search_results(self, html: str, keyword: str) -> List[Dict]:
         """Parse HTML search results"""
