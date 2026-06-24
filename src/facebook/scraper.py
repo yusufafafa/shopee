@@ -13,19 +13,20 @@ class FacebookScraper:
     
     def __init__(self, cookie: str):
         self.cookie = cookie
-        self.base_url = "https://m.facebook.com"
+        # Use desktop Facebook (more reliable with desktop cookies)
+        self.base_url = "https://www.facebook.com"
         self.session = None
     
-async def _get_session(self):
-        """Get aiohttp session with cookie and mobile headers"""
+    async def _get_session(self):
+        """Get aiohttp session with cookie and desktop headers"""
         if self.session is None:
             try:
                 import aiohttp
                 self.session = aiohttp.ClientSession(
                     cookies=self._parse_cookies(self.cookie),
                     headers={
-                        # Android Chrome Mobile User-Agent
-                        "User-Agent": "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
+                        # Desktop Chrome User-Agent
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                         "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
                         "Accept-Encoding": "gzip, deflate, br",
@@ -36,8 +37,6 @@ async def _get_session(self):
                         "Sec-Fetch-Mode": "navigate",
                         "Sec-Fetch-Site": "none",
                         "Cache-Control": "max-age=0",
-                        # Force mobile view
-                        "X-Requested-With": "com.android.chrome",
                     }
                 )
             except ImportError:
@@ -59,24 +58,18 @@ async def _get_session(self):
         posts = []
         session = await self._get_session()
         
-        logger.info("Scraping personal home feed")
+        logger.info("Scraping personal home feed (desktop)")
         
         try:
-            # Force mobile homepage with redirect prevention
-            async with session.get("https://m.facebook.com/home.php", allow_redirects=False) as response:
-                logger.info(f"Home feed response: HTTP {response.status}, Location: {response.headers.get('Location', 'N/A')}")
+            # Go to desktop home feed
+            async with session.get("https://www.facebook.com") as response:
+                logger.info(f"Home feed response: HTTP {response.status}")
                 
-                # If redirected to www, follow it but log warning
-                if response.status == 302 and 'www.facebook.com' in response.headers.get('Location', ''):
-                    logger.warning("Facebook redirected to desktop. Cookie may be from desktop session.")
-                    async with session.get("https://m.facebook.com/home.php") as response:
-                        html = await response.text()
-                elif response.status == 200:
-                    html = await response.text()
-                else:
+                if response.status != 200:
                     logger.error(f"Failed to access home feed: HTTP {response.status}")
                     return posts
                 
+                html = await response.text()
                 logger.info(f"Feed HTML length: {len(html)} bytes")
                 
                 # Check login
@@ -85,7 +78,7 @@ async def _get_session(self):
                     return posts
                 
                 # Parse feed
-                parsed_posts = self._parse_feed(html)
+                parsed_posts = self._parse_desktop_feed(html)
                 logger.info(f"Found {len(parsed_posts)} posts in feed")
                 posts.extend(parsed_posts[:limit])
         
@@ -94,7 +87,74 @@ async def _get_session(self):
         
         return posts
     
-    def _parse_feed(self, html: str) -> List[Dict]:
+    def _parse_desktop_feed(self, html: str) -> List[Dict]:
+        """Parse posts from desktop feed"""
+        posts = []
+        logger.debug(f"Parsing desktop feed, HTML length: {len(html)}")
+        
+        # Preview HTML
+        logger.info(f"Desktop feed preview: {html[:500]}")
+        
+        # Desktop Facebook uses different structure
+        # Look for posts with data-testid="post"
+        post_pattern = r'<div[^>]*data-testid=["\']post[^>]*>(.*?)</div>'
+        post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        # Fallback: article tags
+        if not post_matches:
+            post_pattern = r'<article[^>]*>(.*?)</article>'
+            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        # Fallback: look for posts with profile links
+        if not post_matches:
+            post_pattern = r'(<a[^>]*facebook\.com[^>]*profile\.php[^>]*>.*?</a>.*?(?:</div>|<br[^>]*>))'
+            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        logger.debug(f"Found {len(post_matches)} potential posts in desktop feed")
+        
+        for post_html in post_matches:
+            try:
+                # Author
+                author = "Unknown"
+                author_match = re.search(r'<a[^>]*href=["\'][^/]*profile\.php\?id=\d+[^>]*>([^<]+)</a>', post_html, re.IGNORECASE)
+                if author_match:
+                    author = author_match.group(1).strip()
+                
+                # Content
+                content = ""
+                content_match = re.search(r'<span[^>]*>([^<]{20,500})</span>', post_html, re.IGNORECASE)
+                if content_match:
+                    content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
+                    content = content.replace('"', '"').replace('&', '&')
+                
+                # URL
+                url = ""
+                url_match = re.search(r'href=["\'](/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
+                if url_match:
+                    url = f"{self.base_url}{url_match.group(1)}"
+                
+                # Timestamp
+                timestamp = "Unknown"
+                time_match = re.search(r'(\d+\s*[hdwm]\s*ago|\d+\s*jam\s*yang\s*lalu)', post_html, re.IGNORECASE)
+                if time_match:
+                    timestamp = time_match.group(1).strip()
+                
+                # Add if valid
+                if content and url and len(content) > 10:
+                    posts.append({
+                        "author": author,
+                        "content": content,
+                        "url": url,
+                        "timestamp": timestamp,
+                        "source": "feed"
+                    })
+            
+            except Exception as e:
+                logger.error(f"Error parsing desktop post: {e}")
+                continue
+        
+        logger.info(f"Parsed {len(posts)} valid posts from desktop feed")
+        return posts
         """Parse posts from personal feed"""
         posts = []
         logger.debug(f"Parsing feed, HTML length: {len(html)}")
@@ -170,11 +230,9 @@ async def _get_session(self):
         logger.info(f"Scraping group: {group_url}")
         
         try:
-            # Normalize group URL to mobile
-            if "www.facebook.com" in group_url:
-                group_url = group_url.replace("www.facebook.com", "m.facebook.com")
-            elif "facebook.com" in group_url and "m.facebook.com" not in group_url:
-                group_url = group_url.replace("facebook.com", "m.facebook.com")
+            # Normalize group URL to desktop
+            if "m.facebook.com" in group_url:
+                group_url = group_url.replace("m.facebook.com", "www.facebook.com")
             
             logger.info(f"Normalized URL: {group_url}")
             
@@ -194,7 +252,7 @@ async def _get_session(self):
                     return posts
                 
                 # Parse posts
-                parsed_posts = self._parse_group_feed(html, group_url)
+                parsed_posts = self._parse_desktop_group(html, group_url)
                 logger.info(f"Found {len(parsed_posts)} posts in group")
                 posts.extend(parsed_posts[:limit])
         
@@ -203,52 +261,44 @@ async def _get_session(self):
         
         return posts
     
-    def _parse_group_feed(self, html: str, group_url: str) -> List[Dict]:
-        """Parse posts from group feed"""
+    def _parse_desktop_group(self, html: str, group_url: str) -> List[Dict]:
+        """Parse posts from desktop group feed"""
         posts = []
-        logger.debug(f"Parsing group feed, HTML length: {len(html)}")
+        logger.debug(f"Parsing desktop group feed, HTML length: {len(html)}")
         
         # Preview HTML
         logger.info(f"Group HTML preview: {html[:500]}")
         
-        # Look for posts in group - groups use article or div with data-ft
-        post_pattern = r'<article[^>]*>(.*?)</article>'
+        # Desktop groups use similar structure to feed
+        post_pattern = r'<div[^>]*data-testid=["\']post[^>]*>(.*?)</div>'
         post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
         
-        # Fallback: look for div with role="article"
+        # Fallback: article tags
         if not post_matches:
-            post_pattern = r'<div[^>]*role=["\']article["\'][^>]*>(.*?)</div>'
+            post_pattern = r'<article[^>]*>(.*?)</article>'
             post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
         
-        # Fallback: look for posts with profile links
-        if not post_matches:
-            post_pattern = r'(<a[^>]*profile\.php[^>]*>.*?</a>.*?(?:</div>|<br[^>]*>))'
-            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
-        
-        logger.debug(f"Found {len(post_matches)} potential posts in group")
+        logger.debug(f"Found {len(post_matches)} potential posts in desktop group")
         
         for post_html in post_matches:
             try:
-                # Author
+                # Author, content, URL, timestamp (same as feed parser)
                 author = "Unknown"
                 author_match = re.search(r'<a[^>]*href=["\'][^/]*profile\.php\?id=\d+[^>]*>([^<]+)</a>', post_html, re.IGNORECASE)
                 if author_match:
                     author = author_match.group(1).strip()
                 
-                # Content
                 content = ""
-                content_match = re.search(r'</a>[^>]*>([^<]{20,500})', post_html, re.IGNORECASE)
+                content_match = re.search(r'<span[^>]*>([^<]{20,500})</span>', post_html, re.IGNORECASE)
                 if content_match:
                     content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
                     content = content.replace('"', '"').replace('&', '&')
                 
-                # URL
                 url = ""
                 url_match = re.search(r'href=["\'](/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
                 if url_match:
                     url = f"{self.base_url}{url_match.group(1)}"
                 
-                # Timestamp
                 timestamp = "Unknown"
                 time_match = re.search(r'(\d+\s*[hdwm]\s*ago|\d+\s*jam\s*yang\s*lalu)', post_html, re.IGNORECASE)
                 if time_match:
@@ -266,10 +316,10 @@ async def _get_session(self):
                     })
             
             except Exception as e:
-                logger.error(f"Error parsing group post: {e}")
+                logger.error(f"Error parsing desktop group post: {e}")
                 continue
         
-        logger.info(f"Parsed {len(posts)} valid posts from group")
+        logger.info(f"Parsed {len(posts)} valid posts from desktop group")
         return posts
     
     async def search_posts(self, keywords: List[str], limit: int = 10) -> List[Dict]:
