@@ -120,8 +120,9 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop('awaiting_account_limit', None)
     context.user_data.pop('temp_account_id', None)
     context.user_data.pop('awaiting_setting', None)
-    context.user_data.pop('awaiting_group_url', None)  # NEW
-    context.user_data.pop('awaiting_group_remove', None)  # NEW
+    context.user_data.pop('awaiting_group_url', None)
+    context.user_data.pop('awaiting_group_remove', None)
+    context.user_data.pop('awaiting_account_remove', None)  # NEW
     
     await update.message.reply_text(
         "✅ *Operasi dibatalkan*\n\n"
@@ -243,6 +244,38 @@ async def cmd_trending(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def cmd_removeaccount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /removeaccount command"""
+    context.user_data['awaiting_account_remove'] = True
+    
+    # Get account list for display
+    from src.database.connection import Database
+    db = Database()
+    accounts = db.get_all_accounts()
+    
+    if accounts:
+        account_list = "\n".join([
+            f"{i+1}. {acc.name} - {'✅ Aktif' if acc.is_active and not acc.is_blocked else '🚫 Nonaktif'}"
+            for i, acc in enumerate(accounts)
+        ])
+        
+        await update.message.reply_text(
+            "🗑️ *Hapus Akun Facebook*\n\n"
+            "Ketik **ID akun** yang mau dihapus:\n\n"
+            f"{account_list}\n\n"
+            "Contoh: ketik `1` untuk hapus akun pertama.\n\n"
+            "Ketik /cancel untuk batal.",
+            parse_mode='Markdown'
+        )
+    else:
+        context.user_data.pop('awaiting_account_remove', None)
+        await update.message.reply_text(
+            "❌ Belum ada akun untuk dihapus.\n\n"
+            "Tambahkan akun dulu dengan kirim cookie atau /addaccount.",
+            parse_mode='Markdown'
+        )
+
+
 async def handle_cookie_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming cookie messages"""
     text = update.message.text
@@ -268,9 +301,10 @@ async def handle_cookie_message(update: Update, context: ContextTypes.DEFAULT_TY
     for acc in existing_accounts:
         if acc.cookie == cookie_str:
             await update.message.reply_text(
-                f"ℹ️ *Akun sudah terdaftar!*\n\n"
+                f"ℹ️ *Cookie telah ada!*\n\n"
                 f"Nama: `{acc.name}`\n"
-                f"Status: {'✅ Aktif' if acc.active else '🚫 Nonaktif'}\n\n"
+                f"ID: `{acc.id}`\n"
+                f"Status: {'✅ Aktif' if acc.is_active and not acc.is_blocked else '🚫 Nonaktif'}\n\n"
                 "Tidak perlu tambah ulang.",
                 parse_mode='Markdown'
             )
@@ -286,7 +320,9 @@ async def handle_cookie_message(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text(
         f"✅ *Akun berhasil ditambahkan!*\n\n"
         f"Nama: `{account_name}`\n"
+        f"ID: `{account_count}`\n"
         f"Status: 🟢 Aktif\n\n"
-        "Gunakan /checklogin untuk verifikasi.",
+        "Gunakan /checklogin untuk verifikasi.\n"
+        "Gunakan /removeaccount untuk menghapus.",
         parse_mode='Markdown'
     )

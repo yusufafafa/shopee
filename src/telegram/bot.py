@@ -5,7 +5,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from .handlers import (
-    cmd_start, cmd_addaccount, cmd_checklogin,
+    cmd_start, cmd_addaccount, cmd_removeaccount, cmd_checklogin,
     cmd_status, cmd_statistik, cmd_help, cmd_cancel, cmd_trending,
     cmd_settings, handle_cookie_message
 )
@@ -478,8 +478,37 @@ class TelegramBot:
         return True
     
     async def handle_keyword_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle keyword add/remove input"""
+        """Handle keyword/account/group input"""
         text = update.message.text.strip()
+        
+        # Check if user is removing an account by ID (from /removeaccount command)
+        if context.user_data.get('awaiting_account_remove'):
+            context.user_data.pop('awaiting_account_remove', None)
+            
+            try:
+                account_id = int(text)
+                accounts = self.db.get_all_accounts() if hasattr(self, 'db') else []
+                
+                if 1 <= account_id <= len(accounts):
+                    removed_account = accounts[account_id - 1]
+                    self.db.update_account_status(removed_account.id, is_active=False)
+                    
+                    await update.message.reply_text(
+                        f"✅ Akun *\"{removed_account.name}\"* (ID: {account_id}) berhasil dihapus!\n\n"
+                        "Akun dinonaktifkan dan tidak akan dipakai untuk auto-comment.",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"❌ ID tidak valid. Ketik angka antara 1-{len(accounts)}.",
+                        parse_mode='Markdown'
+                    )
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Input tidak valid. Ketik **ID** (angka), bukan nama akun.",
+                    parse_mode='Markdown'
+                )
+            return
         
         # Check if user is waiting for keyword input
         if context.user_data.get('awaiting_keyword'):
@@ -724,6 +753,35 @@ class TelegramBot:
                 )
             return
         
+        # Check if user is removing an account by ID
+        if context.user_data.get('awaiting_account_remove'):
+            context.user_data.pop('awaiting_account_remove', None)
+            
+            try:
+                account_id = int(text)
+                accounts = self.db.get_all_accounts() if hasattr(self, 'db') else []
+                
+                if 1 <= account_id <= len(accounts):
+                    removed_account = accounts[account_id - 1]
+                    self.db.update_account_status(removed_account.id, is_active=False)
+                    
+                    await update.message.reply_text(
+                        f"✅ Akun *\"{removed_account.name}\"* (ID: {account_id}) berhasil dihapus!\n\n"
+                        "Akun dinonaktifkan dan tidak akan dipakai untuk auto-comment.",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"❌ ID tidak valid. Ketik angka antara 1-{len(accounts)}.",
+                        parse_mode='Markdown'
+                    )
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Input tidak valid. Ketik **ID** (angka), bukan nama akun.",
+                    parse_mode='Markdown'
+                )
+            return
+        
         # Check if message is a cookie (for account addition)
         if "c_user=" in text and "xs=" in text:
             from .handlers import handle_cookie_message
@@ -736,6 +794,7 @@ class TelegramBot:
         # Add command handlers
         self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("addaccount", cmd_addaccount))
+        self.application.add_handler(CommandHandler("removeaccount", cmd_removeaccount))
         self.application.add_handler(CommandHandler("checklogin", cmd_checklogin))
         self.application.add_handler(CommandHandler("status", cmd_status))
         self.application.add_handler(CommandHandler("statistik", cmd_statistik))
