@@ -1,4 +1,4 @@
-"""Facebook post scraper"""
+"""Facebook post scraper using Playwright for headless browser scraping"""
 import asyncio
 import re
 from typing import List, Dict, Optional
@@ -9,39 +9,62 @@ logger = setup_logger("FacebookScraper")
 
 
 class FacebookScraper:
-    """Scrape Facebook posts using cookies"""
+    """Scrape Facebook posts using Playwright headless browser"""
     
     def __init__(self, cookie: str):
         self.cookie = cookie
-        # Use desktop Facebook (more reliable with desktop cookies)
         self.base_url = "https://www.facebook.com"
-        self.session = None
+        self.browser = None
+        self.context = None
+        self.page = None
     
-    async def _get_session(self):
-        """Get aiohttp session with cookie and desktop headers"""
-        if self.session is None:
-            try:
-                import aiohttp
-                self.session = aiohttp.ClientSession(
-                    cookies=self._parse_cookies(self.cookie),
-                    headers={
-                        # Desktop Chrome User-Agent
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-                        "Accept-Encoding": "gzip, deflate, br",
-                        "DNT": "1",
-                        "Connection": "keep-alive",
-                        "Upgrade-Insecure-Requests": "1",
-                        "Sec-Fetch-Dest": "document",
-                        "Sec-Fetch-Mode": "navigate",
-                        "Sec-Fetch-Site": "none",
-                        "Cache-Control": "max-age=0",
-                    }
-                )
-            except ImportError:
-                raise ImportError("aiohttp not installed. Run: pip install aiohttp")
-        return self.session
+    async def _init_browser(self):
+        """Initialize Playwright browser with cookie authentication"""
+        if self.browser is not None:
+            return
+        
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            raise ImportError("playwright not installed. Run: pip install playwright && playwright install")
+        
+        logger.info("Initializing Playwright browser (headless)...")
+        
+        playwright = await async_playwright().start()
+        
+        # Launch browser in headless mode
+        self.browser = await playwright.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--disable-gpu',
+                '--window-size=1920,1080',
+            ]
+        )
+        
+        # Parse cookies
+        cookies = self._parse_cookies(self.cookie)
+        
+        # Create context with cookies
+        self.context = await self.browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            cookies=[
+                {
+                    'name': key,
+                    'value': value,
+                    'domain': '.facebook.com',
+                    'path': '/',
+                }
+                for key, value in cookies.items()
+            ]
+        )
+        
+        self.page = await self.context.new_page()
+        logger.info("Browser initialized successfully")
     
     def _parse_cookies(self, cookie_str: str) -> Dict[str, str]:
         """Parse cookie string to dict"""
@@ -56,391 +79,249 @@ class FacebookScraper:
     async def scrape_personal_feed(self, limit: int = 20) -> List[Dict]:
         """Scrape posts from user's personal home feed"""
         posts = []
-        session = await self._get_session()
-        
-        logger.info("Scraping personal home feed (desktop)")
         
         try:
-            # Go to desktop home feed
-            async with session.get("https://www.facebook.com") as response:
-                logger.info(f"Home feed response: HTTP {response.status}")
-                
-                if response.status != 200:
-                    logger.error(f"Failed to access home feed: HTTP {response.status}")
-                    return posts
-                
-                html = await response.text()
-                logger.info(f"Feed HTML length: {len(html)} bytes")
-                
-                # Check login
-                if "login" in response.url.path.lower():
-                    logger.error("Redirected to login - session invalid")
-                    return posts
-                
-                # Parse feed
-                parsed_posts = self._parse_desktop_feed(html)
-                logger.info(f"Found {len(parsed_posts)} posts in feed")
-                posts.extend(parsed_posts[:limit])
+            await self._init_browser()
+            
+            logger.info("Scraping personal home feed (desktop)")
+            
+            # Navigate to home feed
+            await self.page.goto("https://www.facebook.com", wait_until='networkidle', timeout=60000)
+            
+            # Wait a bit for content to load
+            await asyncio.sleep(3)
+            
+            # Get page HTML
+            html = await self.page.content()
+            logger.info(f"Feed HTML length: {len(html)} bytes")
+            
+            # Check if logged in
+            if "login" in self.page.url.lower():
+                logger.error("Redirected to login - session invalid")
+                return posts
+            
+            # Parse posts from HTML
+            posts = self._parse_posts(html, source="feed")
+            logger.info(f"Found {len(posts)} posts in feed")
+            
+            return posts[:limit]
         
         except Exception as e:
             logger.error(f"Error scraping feed: {e}", exc_info=True)
-        
-        return posts
-    
-    def _parse_desktop_feed(self, html: str) -> List[Dict]:
-        """Parse posts from desktop feed"""
-        posts = []
-        logger.debug(f"Parsing desktop feed, HTML length: {len(html)}")
-        
-        # Preview HTML
-        logger.info(f"Desktop feed preview: {html[:500]}")
-        
-        # Desktop Facebook uses different structure
-        # Look for posts with data-testid="post"
-        post_pattern = r'<div[^>]*data-testid=["\']post[^>]*>(.*?)</div>'
-        post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
-        
-        # Fallback: article tags
-        if not post_matches:
-            post_pattern = r'<article[^>]*>(.*?)</article>'
-            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
-        
-        # Fallback: look for posts with profile links
-        if not post_matches:
-            post_pattern = r'(<a[^>]*facebook\.com[^>]*profile\.php[^>]*>.*?</a>.*?(?:</div>|<br[^>]*>))'
-            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
-        
-        logger.debug(f"Found {len(post_matches)} potential posts in desktop feed")
-        
-        for post_html in post_matches:
-            try:
-                # Author
-                author = "Unknown"
-                author_match = re.search(r'<a[^>]*href=["\'][^/]*profile\.php\?id=\d+[^>]*>([^<]+)</a>', post_html, re.IGNORECASE)
-                if author_match:
-                    author = author_match.group(1).strip()
-                
-                # Content
-                content = ""
-                content_match = re.search(r'<span[^>]*>([^<]{20,500})</span>', post_html, re.IGNORECASE)
-                if content_match:
-                    content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
-                    content = content.replace('"', '"').replace('&', '&')
-                
-                # URL
-                url = ""
-                url_match = re.search(r'href=["\'](/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
-                if url_match:
-                    url = f"{self.base_url}{url_match.group(1)}"
-                
-                # Timestamp
-                timestamp = "Unknown"
-                time_match = re.search(r'(\d+\s*[hdwm]\s*ago|\d+\s*jam\s*yang\s*lalu)', post_html, re.IGNORECASE)
-                if time_match:
-                    timestamp = time_match.group(1).strip()
-                
-                # Add if valid
-                if content and url and len(content) > 10:
-                    posts.append({
-                        "author": author,
-                        "content": content,
-                        "url": url,
-                        "timestamp": timestamp,
-                        "source": "feed"
-                    })
-            
-            except Exception as e:
-                logger.error(f"Error parsing desktop post: {e}")
-                continue
-        
-        logger.info(f"Parsed {len(posts)} valid posts from desktop feed")
-        return posts
-        """Parse posts from personal feed"""
-        posts = []
-        logger.debug(f"Parsing feed, HTML length: {len(html)}")
-        
-        # Preview HTML for debugging
-        logger.info(f"Feed HTML preview: {html[:500]}")
-        
-        # Look for posts - feed uses article tags or div with data-ft
-        post_pattern = r'<article[^>]*>(.*?)</article>'
-        post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
-        
-        # Fallback: div with role="article"
-        if not post_matches:
-            post_pattern = r'<div[^>]*role=["\']article["\'][^>]*>(.*?)</div>'
-            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
-        
-        # Fallback: look for posts with profile links
-        if not post_matches:
-            post_pattern = r'(<a[^>]*profile\.php[^>]*>.*?</a>.*?(?:</div>|<br[^>]*>))'
-            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
-        
-        logger.debug(f"Found {len(post_matches)} potential posts in feed")
-        
-        for post_html in post_matches:
-            try:
-                # Author
-                author = "Unknown"
-                author_match = re.search(r'<a[^>]*href=["\'][^/]*profile\.php\?id=\d+[^>]*>([^<]+)</a>', post_html, re.IGNORECASE)
-                if author_match:
-                    author = author_match.group(1).strip()
-                
-                # Content
-                content = ""
-                content_match = re.search(r'</a>[^>]*>([^<]{20,500})', post_html, re.IGNORECASE)
-                if content_match:
-                    content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
-                    content = content.replace('"', '"').replace('&', '&')
-                
-                # URL
-                url = ""
-                url_match = re.search(r'href=["\'](/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
-                if url_match:
-                    url = f"{self.base_url}{url_match.group(1)}"
-                
-                # Timestamp
-                timestamp = "Unknown"
-                time_match = re.search(r'(\d+\s*[hdwm]\s*ago|\d+\s*jam\s*yang\s*lalu)', post_html, re.IGNORECASE)
-                if time_match:
-                    timestamp = time_match.group(1).strip()
-                
-                # Add if valid
-                if content and url and len(content) > 10:
-                    posts.append({
-                        "author": author,
-                        "content": content,
-                        "url": url,
-                        "timestamp": timestamp,
-                        "source": "feed"
-                    })
-            
-            except Exception as e:
-                logger.error(f"Error parsing feed post: {e}")
-                continue
-        
-        logger.info(f"Parsed {len(posts)} valid posts from feed")
-        return posts
+            return posts
     
     async def scrape_group_feed(self, group_url: str, limit: int = 20) -> List[Dict]:
         """Scrape posts from a Facebook group feed"""
         posts = []
-        session = await self._get_session()
-        
-        logger.info(f"Scraping group: {group_url}")
         
         try:
-            # Normalize group URL to desktop
+            await self._init_browser()
+            
+            logger.info(f"Scraping group: {group_url}")
+            
+            # Normalize URL to desktop
             if "m.facebook.com" in group_url:
                 group_url = group_url.replace("m.facebook.com", "www.facebook.com")
             
-            logger.info(f"Normalized URL: {group_url}")
+            # Navigate to group
+            await self.page.goto(group_url, wait_until='networkidle', timeout=60000)
             
-            async with session.get(group_url) as response:
-                logger.info(f"Group response: HTTP {response.status}")
-                
-                if response.status != 200:
-                    logger.error(f"Failed to access group: HTTP {response.status}")
-                    return posts
-                
-                html = await response.text()
-                logger.info(f"Group HTML length: {len(html)} bytes")
-                
-                # Check login
-                if "login" in response.url.path.lower():
-                    logger.error("Redirected to login - session invalid")
-                    return posts
-                
-                # Parse posts
-                parsed_posts = self._parse_desktop_group(html, group_url)
-                logger.info(f"Found {len(parsed_posts)} posts in group")
-                posts.extend(parsed_posts[:limit])
+            # Wait for content to load
+            await asyncio.sleep(3)
+            
+            # Get page HTML
+            html = await self.page.content()
+            logger.info(f"Group HTML length: {len(html)} bytes")
+            
+            # Check if logged in
+            if "login" in self.page.url.lower():
+                logger.error("Redirected to login - session invalid")
+                return posts
+            
+            # Parse posts
+            posts = self._parse_posts(html, source="group", group_url=group_url)
+            logger.info(f"Found {len(posts)} posts in group")
+            
+            return posts[:limit]
         
         except Exception as e:
             logger.error(f"Error scraping group {group_url}: {e}", exc_info=True)
-        
-        return posts
+            return posts
     
-    def _parse_desktop_group(self, html: str, group_url: str) -> List[Dict]:
-        """Parse posts from desktop group feed"""
+    def _parse_posts(self, html: str, source: str = "feed", group_url: str = None) -> List[Dict]:
+        """Parse posts from HTML content"""
         posts = []
-        logger.debug(f"Parsing desktop group feed, HTML length: {len(html)}")
+        logger.debug(f"Parsing posts from {source}, HTML length: {len(html)}")
         
-        # Preview HTML
-        logger.info(f"Group HTML preview: {html[:500]}")
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            raise ImportError("beautifulsoup4 not installed. Run: pip install beautifulsoup4")
         
-        # Desktop groups use similar structure to feed
-        post_pattern = r'<div[^>]*data-testid=["\']post[^>]*>(.*?)</div>'
-        post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        soup = BeautifulSoup(html, 'html.parser')
         
-        # Fallback: article tags
-        if not post_matches:
-            post_pattern = r'<article[^>]*>(.*?)</article>'
-            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        # Find all post containers - Facebook uses various structures
+        # Try multiple selectors
+        post_containers = []
         
-        logger.debug(f"Found {len(post_matches)} potential posts in desktop group")
+        # Selector 1: div with role="article"
+        post_containers.extend(soup.find_all('div', role='article'))
         
-        for post_html in post_matches:
+        # Selector 2: article tags
+        post_containers.extend(soup.find_all('article'))
+        
+        # Selector 3: div with data-testid="post"
+        post_containers.extend(soup.find_all('div', attrs={'data-testid': lambda x: x and 'post' in x.lower()}))
+        
+        logger.debug(f"Found {len(post_containers)} potential post containers")
+        
+        for container in post_containers:
             try:
-                # Author, content, URL, timestamp (same as feed parser)
-                author = "Unknown"
-                author_match = re.search(r'<a[^>]*href=["\'][^/]*profile\.php\?id=\d+[^>]*>([^<]+)</a>', post_html, re.IGNORECASE)
-                if author_match:
-                    author = author_match.group(1).strip()
-                
-                content = ""
-                content_match = re.search(r'<span[^>]*>([^<]{20,500})</span>', post_html, re.IGNORECASE)
-                if content_match:
-                    content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
-                    content = content.replace('"', '"').replace('&', '&')
-                
-                url = ""
-                url_match = re.search(r'href=["\'](/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
-                if url_match:
-                    url = f"{self.base_url}{url_match.group(1)}"
-                
-                timestamp = "Unknown"
-                time_match = re.search(r'(\d+\s*[hdwm]\s*ago|\d+\s*jam\s*yang\s*lalu)', post_html, re.IGNORECASE)
-                if time_match:
-                    timestamp = time_match.group(1).strip()
-                
-                # Add if valid
-                if content and url and len(content) > 10:
-                    posts.append({
-                        "author": author,
-                        "content": content,
-                        "url": url,
-                        "timestamp": timestamp,
-                        "source": "group",
-                        "group_url": group_url
-                    })
-            
+                post_data = self._extract_post_data(container, source, group_url)
+                if post_data and post_data.get('content'):
+                    posts.append(post_data)
             except Exception as e:
-                logger.error(f"Error parsing desktop group post: {e}")
-                continue
-        
-        logger.info(f"Parsed {len(posts)} valid posts from desktop group")
-        return posts
-    
-    async def search_posts(self, keywords: List[str], limit: int = 10) -> List[Dict]:
-        """Search for posts containing keywords (deprecated, use scrape_group_feed instead)"""
-        # Legacy method - return empty
-        logger.warning("search_posts() is deprecated. Use scrape_group_feed() instead.")
-        return []
-    
-    def _parse_search_results(self, html: str, keyword: str) -> List[Dict]:
-        """Parse HTML search results"""
-        posts = []
-        logger.debug(f"Parsing HTML for '{keyword}', length: {len(html)}")
-        
-        # Look for posts with profile links
-        post_pattern = r'(<a[^>]*profile\.php[^>]*>.*?</a>.*?(?:</div>|<br[^>]*>))'
-        post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
-        
-        logger.debug(f"Found {len(post_matches)} potential posts")
-        
-        for post_html in post_matches:
-            try:
-                # Author
-                author = "Unknown"
-                author_match = re.search(r'<a[^>]*href=["\'][^/]*profile\.php\?id=\d+[^>]*>([^<]+)</a>', post_html, re.IGNORECASE)
-                if author_match:
-                    author = author_match.group(1).strip()
-                
-                # Content
-                content = ""
-                content_match = re.search(r'</a>[^>]*>([^<]{20,500})', post_html, re.IGNORECASE)
-                if content_match:
-                    content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
-                    content = content.replace('"', '"').replace('&', '&')
-                
-                # URL
-                url = ""
-                url_match = re.search(r'href=["\'](/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
-                if url_match:
-                    url = f"{self.base_url}{url_match.group(1)}"
-                
-                # Timestamp
-                timestamp = "Unknown"
-                time_match = re.search(r'(\d+\s*[hdwm]\s*ago|\d+\s*jam\s*yang\s*lalu)', post_html, re.IGNORECASE)
-                if time_match:
-                    timestamp = time_match.group(1).strip()
-                
-                # Add if valid
-                if content and url and len(content) > 10:
-                    posts.append({
-                        "author": author,
-                        "content": content,
-                        "url": url,
-                        "timestamp": timestamp,
-                        "keyword": keyword
-                    })
-            
-            except Exception as e:
-                logger.error(f"Error parsing post: {e}")
+                logger.debug(f"Error parsing post container: {e}")
                 continue
         
         logger.info(f"Parsed {len(posts)} valid posts")
         return posts
     
-    async def post_comment(self, post_url: str, comment_text: str) -> bool:
-        """Post comment on a Facebook post"""
-        session = await self._get_session()
-        
+    def _extract_post_data(self, container, source: str, group_url: str = None) -> Optional[Dict]:
+        """Extract post data from container element"""
         try:
-            # Normalize URL
-            if "www.facebook.com" in post_url:
-                post_url = post_url.replace("www.facebook.com", "m.facebook.com")
-            elif "facebook.com" in post_url and "m.facebook.com" not in post_url:
-                post_url = post_url.replace("facebook.com", "m.facebook.com")
+            # Author
+            author = "Unknown"
+            author_elem = container.find('a', href=re.compile(r'profile\.php\?id=\d+'))
+            if not author_elem:
+                # Try finding by text pattern
+                author_elem = container.find('a', string=re.compile(r'.{2,50}'))
             
-            # Get post page
-            async with session.get(post_url) as response:
-                post_html = await response.text()
-                if "login" in response.url.path.lower():
-                    logger.error("Redirected to login")
-                    return False
+            if author_elem:
+                author = author_elem.get_text(strip=True)
+                if len(author) > 50:
+                    author = author[:50] + "..."
             
-            # Extract story FID
-            fid_match = re.search(r'["\']ft_ent_identifier["\']:\s*["\']([^"\']+)["\']', post_html)
-            if not fid_match:
-                fid_match = re.search(r'data-ft=["\'].+?ft_ent_identifier=([^"&]+)', post_html)
-            if not fid_match:
-                fid_match = re.search(r'story\.php\?[^&]*fbid=([^&]+)', post_url)
+            # Content - look for text in spans, divs
+            content = ""
             
-            story_fid = fid_match.group(1) if fid_match else post_url.split("=")[-1]
+            # Try to find post text
+            text_elems = container.find_all(['span', 'div'], string=True)
+            for elem in text_elems:
+                text = elem.get_text(strip=True)
+                # Filter for meaningful content (not just UI elements)
+                if len(text) > 20 and len(text) < 1000:
+                    # Avoid common UI text
+                    if not any(skip in text.lower() for skip in ['comment', 'share', 'like', 'react', 'see more', 'see less']):
+                        content = text
+                        break
             
-            # Extract CSRF token
-            dtsg_match = re.search(r'["\']fb_dtsg["\']:\s*["\']([^"\']+)["\']', post_html)
-            fb_dtsg = dtsg_match.group(1) if dtsg_match else None
+            if not content:
+                # Fallback: get all text and clean it
+                all_text = container.get_text(separator=' ', strip=True)
+                if len(all_text) > 50:
+                    content = all_text[:500]
             
-            # Build comment URL
-            comment_url = f"{self.base_url}/a/comment.php"
+            # URL - look for story links
+            url = ""
+            story_link = container.find('a', href=re.compile(r'/story\.php\?|/posts/|/permalink/'))
+            if story_link:
+                href = story_link.get('href', '')
+                if href.startswith('/'):
+                    url = f"{self.base_url}{href}"
+                elif href.startswith('http'):
+                    url = href
             
-            # Form data
-            form_data = {
-                "comment_text": comment_text,
-                "ft_ent_identifier": story_fid,
-                "source": "www",
-            }
+            # Timestamp
+            timestamp = "Unknown"
+            time_elem = container.find(['abbr', 'span'], string=re.compile(r'\d+\s*(h|d|w|m|jam|hari|minggu|bulan)\s*(ago|yang lalu)?', re.I))
+            if time_elem:
+                timestamp = time_elem.get_text(strip=True)
             
-            if fb_dtsg:
-                form_data["fb_dtsg"] = fb_dtsg
+            # Only add if we have meaningful content
+            if content and len(content) > 20 and url:
+                post_data = {
+                    "author": author,
+                    "content": content,
+                    "url": url,
+                    "timestamp": timestamp,
+                    "source": source
+                }
+                
+                if source == "group" and group_url:
+                    post_data["group_url"] = group_url
+                
+                return post_data
             
-            # Post comment
-            async with session.post(comment_url, data=form_data) as response:
-                result = await response.text()
-                if "error" not in result.lower() and "failed" not in result.lower():
-                    return True
-                logger.warning(f"Comment may have failed: {result[:200]}")
+            return None
+        
+        except Exception as e:
+            logger.debug(f"Error extracting post data: {e}")
+            return None
+    
+    async def post_comment(self, post_url: str, comment_text: str) -> bool:
+        """Post comment on a Facebook post using Playwright"""
+        try:
+            await self._init_browser()
+            
+            logger.info(f"Posting comment on: {post_url}")
+            
+            # Navigate to post
+            await self.page.goto(post_url, wait_until='networkidle', timeout=60000)
+            await asyncio.sleep(2)
+            
+            # Try to find comment box and post
+            # Facebook's structure varies, so we try multiple approaches
+            
+            # Approach 1: Look for comment textarea
+            comment_box = None
+            selectors = [
+                'textarea[placeholder*="comment"]',
+                'textarea[placeholder*="Comment"]',
+                'textarea[aria-label*="comment"]',
+                'div[contenteditable="true"][role="textbox"]',
+            ]
+            
+            for selector in selectors:
+                comment_box = await self.page.query_selector(selector)
+                if comment_box:
+                    break
+            
+            if not comment_box:
+                logger.error("Could not find comment box")
+                return False
+            
+            # Type comment
+            await comment_box.fill(comment_text)
+            await asyncio.sleep(1)
+            
+            # Find and click post button
+            post_button = await self.page.query_selector('button[type="submit"]')
+            if not post_button:
+                post_button = await self.page.query_selector('button:has-text("Post")')
+            
+            if post_button:
+                await post_button.click()
+                await asyncio.sleep(2)
+                logger.info("Comment posted successfully")
+                return True
+            else:
+                logger.error("Could not find post button")
                 return False
         
         except Exception as e:
-            logger.error(f"Error posting comment: {e}")
+            logger.error(f"Error posting comment: {e}", exc_info=True)
             return False
     
     async def close(self):
-        """Close session"""
-        if self.session:
-            await self.session.close()
-            self.session = None
+        """Close browser"""
+        if self.page:
+            await self.page.close()
+            self.page = None
+        if self.context:
+            await self.context.close()
+            self.context = None
+        if self.browser:
+            await self.browser.close()
+            self.browser = None
+        logger.info("Browser closed")
