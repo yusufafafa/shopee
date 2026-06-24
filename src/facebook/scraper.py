@@ -45,23 +45,25 @@ class FacebookScraper:
             ]
         )
         
-        # Parse cookies
-        cookies = self._parse_cookies(self.cookie)
-        
-        # Create context with cookies
+        # Create context first (without cookies)
         self.context = await self.browser.new_context(
             viewport={'width': 1920, 'height': 1080},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            cookies=[
-                {
-                    'name': key,
-                    'value': value,
-                    'domain': '.facebook.com',
-                    'path': '/',
-                }
-                for key, value in cookies.items()
-            ]
         )
+        
+        # Parse and set cookies
+        cookies = self._parse_cookies(self.cookie)
+        formatted_cookies = [
+            {
+                'name': key,
+                'value': value,
+                'domain': '.facebook.com',
+                'path': '/',
+            }
+            for key, value in cookies.items()
+        ]
+        
+        await self.context.add_cookies(formatted_cookies)
         
         self.page = await self.context.new_page()
         logger.info("Browser initialized successfully")
