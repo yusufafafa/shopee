@@ -47,6 +47,108 @@ class FacebookScraper:
                 cookies[key.strip()] = value.strip()
         return cookies
     
+    async def scrape_personal_feed(self, limit: int = 20) -> List[Dict]:
+        """Scrape posts from user's personal home feed"""
+        posts = []
+        session = await self._get_session()
+        
+        logger.info("Scraping personal home feed")
+        
+        try:
+            # Go to mobile home feed
+            async with session.get("https://m.facebook.com") as response:
+                logger.info(f"Home feed response: HTTP {response.status}")
+                
+                if response.status != 200:
+                    logger.error(f"Failed to access home feed: HTTP {response.status}")
+                    return posts
+                
+                html = await response.text()
+                logger.info(f"Feed HTML length: {len(html)} bytes")
+                
+                # Check login
+                if "login" in response.url.path.lower():
+                    logger.error("Redirected to login - session invalid")
+                    return posts
+                
+                # Parse feed
+                parsed_posts = self._parse_feed(html)
+                logger.info(f"Found {len(parsed_posts)} posts in feed")
+                posts.extend(parsed_posts[:limit])
+        
+        except Exception as e:
+            logger.error(f"Error scraping feed: {e}", exc_info=True)
+        
+        return posts
+    
+    def _parse_feed(self, html: str) -> List[Dict]:
+        """Parse posts from personal feed"""
+        posts = []
+        logger.debug(f"Parsing feed, HTML length: {len(html)}")
+        
+        # Preview HTML for debugging
+        logger.info(f"Feed HTML preview: {html[:500]}")
+        
+        # Look for posts - feed uses article tags or div with data-ft
+        post_pattern = r'<article[^>]*>(.*?)</article>'
+        post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        # Fallback: div with role="article"
+        if not post_matches:
+            post_pattern = r'<div[^>]*role=["\']article["\'][^>]*>(.*?)</div>'
+            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        # Fallback: look for posts with profile links
+        if not post_matches:
+            post_pattern = r'(<a[^>]*profile\.php[^>]*>.*?</a>.*?(?:</div>|<br[^>]*>))'
+            post_matches = re.findall(post_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        logger.debug(f"Found {len(post_matches)} potential posts in feed")
+        
+        for post_html in post_matches:
+            try:
+                # Author
+                author = "Unknown"
+                author_match = re.search(r'<a[^>]*href=["\'][^/]*profile\.php\?id=\d+[^>]*>([^<]+)</a>', post_html, re.IGNORECASE)
+                if author_match:
+                    author = author_match.group(1).strip()
+                
+                # Content
+                content = ""
+                content_match = re.search(r'</a>[^>]*>([^<]{20,500})', post_html, re.IGNORECASE)
+                if content_match:
+                    content = re.sub(r'<[^>]+>', '', content_match.group(1)).strip()
+                    content = content.replace('"', '"').replace('&', '&')
+                
+                # URL
+                url = ""
+                url_match = re.search(r'href=["\'](/story\.php\?[^"\']+)["\']', post_html, re.IGNORECASE)
+                if url_match:
+                    url = f"{self.base_url}{url_match.group(1)}"
+                
+                # Timestamp
+                timestamp = "Unknown"
+                time_match = re.search(r'(\d+\s*[hdwm]\s*ago|\d+\s*jam\s*yang\s*lalu)', post_html, re.IGNORECASE)
+                if time_match:
+                    timestamp = time_match.group(1).strip()
+                
+                # Add if valid
+                if content and url and len(content) > 10:
+                    posts.append({
+                        "author": author,
+                        "content": content,
+                        "url": url,
+                        "timestamp": timestamp,
+                        "source": "feed"
+                    })
+            
+            except Exception as e:
+                logger.error(f"Error parsing feed post: {e}")
+                continue
+        
+        logger.info(f"Parsed {len(posts)} valid posts from feed")
+        return posts
+    
     async def scrape_group_feed(self, group_url: str, limit: int = 20) -> List[Dict]:
         """Scrape posts from a Facebook group feed"""
         posts = []
