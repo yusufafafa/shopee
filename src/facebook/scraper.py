@@ -87,11 +87,36 @@ class FacebookScraper:
             
             logger.info("Scraping personal home feed (desktop)")
             
-            # Navigate to home feed
-            await self.page.goto("https://www.facebook.com", wait_until='networkidle', timeout=60000)
-            
-            # Wait a bit for content to load
-            await asyncio.sleep(3)
+            # Navigate to home feed with retry
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Loading Facebook (attempt {attempt + 1}/{max_retries})...")
+                    
+                    # Use 'domcontentloaded' instead of 'networkidle' for faster load
+                    await self.page.goto(
+                        "https://www.facebook.com",
+                        wait_until='domcontentloaded',
+                        timeout=30000
+                    )
+                    
+                    # Wait for content to render
+                    await asyncio.sleep(5)
+                    
+                    # Check if stuck at login page
+                    current_url = self.page.url
+                    if "login" in current_url.lower() or "checkpoint" in current_url.lower():
+                        logger.error(f"Redirected to login/checkpoint: {current_url}")
+                        logger.error("Cookie mungkin expired atau invalid. Silakan add account baru via Telegram.")
+                        return posts
+                    
+                    break  # Success
+                    
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise
+                    logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying...")
+                    await asyncio.sleep(2)
             
             # Get page HTML
             html = await self.page.content()
