@@ -41,14 +41,19 @@ class FacebookScraper:
                 '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas',
                 '--disable-gpu',
-                '--window-size=1920,1080',
+                '--window-size=375,812',  # Mobile size
             ]
         )
         
-        # Create context first (without cookies)
+        # Mobile user agent
+        mobile_ua = "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        
+        # Create context with mobile viewport and user agent
         self.context = await self.browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={'width': 375, 'height': 812},
+            user_agent=mobile_ua,
+            device_scale_factor=1,
+            is_mobile=True,
         )
         
         # Parse and set cookies
@@ -66,7 +71,7 @@ class FacebookScraper:
         await self.context.add_cookies(formatted_cookies)
         
         self.page = await self.context.new_page()
-        logger.info("Browser initialized successfully")
+        logger.info("Browser initialized successfully (mobile mode)")
     
     def _parse_cookies(self, cookie_str: str) -> Dict[str, str]:
         """Parse cookie string to dict"""
@@ -85,17 +90,17 @@ class FacebookScraper:
         try:
             await self._init_browser()
             
-            logger.info("Scraping personal home feed (desktop)")
+            logger.info("Scraping personal home feed (mobile)")
             
-            # Navigate to home feed with retry
+            # Navigate to mobile home feed with retry
             max_retries = 2
             for attempt in range(max_retries):
                 try:
-                    logger.info(f"Loading Facebook (attempt {attempt + 1}/{max_retries})...")
+                    logger.info(f"Loading Facebook mobile (attempt {attempt + 1}/{max_retries})...")
                     
-                    # Use 'domcontentloaded' instead of 'networkidle' for faster load
+                    # Use mobile Facebook - lighter and faster
                     await self.page.goto(
-                        "https://www.facebook.com",
+                        "https://m.facebook.com/home.php",
                         wait_until='domcontentloaded',
                         timeout=30000
                     )
@@ -146,15 +151,43 @@ class FacebookScraper:
             
             logger.info(f"Scraping group: {group_url}")
             
-            # Normalize URL to desktop
-            if "m.facebook.com" in group_url:
-                group_url = group_url.replace("m.facebook.com", "www.facebook.com")
+            # Normalize URL to mobile
+            if "www.facebook.com" in group_url:
+                group_url = group_url.replace("www.facebook.com", "m.facebook.com")
+            elif "facebook.com" in group_url and "m.facebook.com" not in group_url:
+                group_url = group_url.replace("facebook.com", "m.facebook.com")
             
-            # Navigate to group
-            await self.page.goto(group_url, wait_until='networkidle', timeout=60000)
+            logger.info(f"Normalized mobile URL: {group_url}")
             
-            # Wait for content to load
-            await asyncio.sleep(3)
+            # Navigate to group with retry
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Loading group (attempt {attempt + 1}/{max_retries})...")
+                    
+                    await self.page.goto(
+                        group_url,
+                        wait_until='domcontentloaded',
+                        timeout=30000
+                    )
+                    
+                    # Wait for content to load
+                    await asyncio.sleep(5)
+                    
+                    # Check if stuck at login
+                    current_url = self.page.url
+                    if "login" in current_url.lower() or "checkpoint" in current_url.lower():
+                        logger.error(f"Redirected to login/checkpoint: {current_url}")
+                        logger.error("Cookie mungkin expired atau invalid.")
+                        return posts
+                    
+                    break  # Success
+                    
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise
+                    logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying...")
+                    await asyncio.sleep(2)
             
             # Get page HTML
             html = await self.page.content()
