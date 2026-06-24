@@ -273,36 +273,39 @@ class TelegramBot:
                 parse_mode='Markdown'
             )
         elif data == "set_daily_limit":
+            context.user_data['awaiting_setting'] = 'comments_per_account_per_day'
             await query.edit_message_text(
                 "📊 *Set Daily Limit*\n\n"
-                "Ketik: `/setaccountlimit [id] [limit]`\n\n"
-                "Contoh: `/setaccountlimit 1 50`\n\n"
-                "Atau gunakan /checklogin untuk melihat ID akun.",
+                "Ketik **angka** untuk daily limit per akun:\n\n"
+                "Contoh: `20`, `50`, `100`\n\n"
+                "Ketik /cancel untuk batal.",
                 parse_mode='Markdown'
             )
         elif data == "set_min_delay":
+            context.user_data['awaiting_setting'] = 'min_delay_seconds'
             await query.edit_message_text(
                 "⏱️ *Set Minimum Delay*\n\n"
-                "Delay minimum antara comment (dalam detik).\n\n"
-                "Edit di `src/core/settings.py` atau via environment variable:\n"
-                "`MIN_DELAY_SECONDS=120`",
+                "Ketik **angka** untuk delay minimum (dalam detik):\n\n"
+                "Contoh: `60` (1 menit), `120` (2 menit)\n\n"
+                "Ketik /cancel untuk batal.",
                 parse_mode='Markdown'
             )
         elif data == "set_max_delay":
+            context.user_data['awaiting_setting'] = 'max_delay_seconds'
             await query.edit_message_text(
                 "⏱️ *Set Maximum Delay*\n\n"
-                "Delay maximum antara comment (dalam detik).\n\n"
-                "Edit di `src/core/settings.py` atau via environment variable:\n"
-                "`MAX_DELAY_SECONDS=600`",
+                "Ketik **angka** untuk delay maximum (dalam detik):\n\n"
+                "Contoh: `300` (5 menit), `600` (10 menit)\n\n"
+                "Ketik /cancel untuk batal.",
                 parse_mode='Markdown'
             )
         elif data == "set_operating_hours":
+            context.user_data['awaiting_setting'] = 'operating_hours'
             await query.edit_message_text(
-                "🕐 *Operating Hours*\n\n"
-                "Jam operasional bot (format 24 jam).\n\n"
-                "Edit di `src/core/settings.py`:\n"
-                "`OPERATING_START=9`\n"
-                "`OPERATING_END=20`",
+                "🕐 *Set Operating Hours*\n\n"
+                "Ketik **jam mulai-jam selesai** (format 24 jam):\n\n"
+                "Contoh: `9-20`, `8-22`, `10-18`\n\n"
+                "Ketik /cancel untuk batal.",
                 parse_mode='Markdown'
             )
         elif data == "settings":
@@ -512,6 +515,67 @@ class TelegramBot:
             except ValueError:
                 await update.message.reply_text(
                     "❌ Input tidak valid. Ketik **nomor** (angka), bukan nama produk.",
+                    parse_mode='Markdown'
+                )
+            return
+        
+        # Check if user is updating a setting
+        if context.user_data.get('awaiting_setting'):
+            setting_key = context.user_data.pop('awaiting_setting', None)
+            
+            try:
+                if setting_key == 'operating_hours':
+                    # Parse operating hours (format: 9-20)
+                    if '-' not in text:
+                        raise ValueError("Format harus: jam_mulai-jam_selesai")
+                    
+                    start, end = map(int, text.split('-'))
+                    if not (0 <= start <= 23 and 0 <= end <= 23 and start < end):
+                        raise ValueError("Jam harus 0-23 dan mulai < selesai")
+                    
+                    self.settings.update(
+                        operating_start=start,
+                        operating_end=end
+                    )
+                    
+                    await update.message.reply_text(
+                        f"✅ Operating hours updated!\n\n"
+                        f"Jam operasional: {start}:00 - {end}:00",
+                        parse_mode='Markdown'
+                    )
+                
+                elif setting_key in ['comments_per_account_per_day', 'min_delay_seconds', 'max_delay_seconds']:
+                    # Parse numeric setting
+                    value = int(text)
+                    if value <= 0:
+                        raise ValueError("Nilai harus > 0")
+                    
+                    self.settings.update(**{setting_key: value})
+                    
+                    setting_names = {
+                        'comments_per_account_per_day': 'Daily Limit',
+                        'min_delay_seconds': 'Minimum Delay',
+                        'max_delay_seconds': 'Maximum Delay'
+                    }
+                    
+                    units = {
+                        'comments_per_account_per_day': 'comments/day',
+                        'min_delay_seconds': 'seconds',
+                        'max_delay_seconds': 'seconds'
+                    }
+                    
+                    await update.message.reply_text(
+                        f"✅ {setting_names[setting_key]} updated!\n\n"
+                        f"New value: **{value}** {units[setting_key]}",
+                        parse_mode='Markdown'
+                    )
+                
+                else:
+                    await update.message.reply_text("❌ Setting tidak dikenali.")
+            
+            except ValueError as e:
+                await update.message.reply_text(
+                    f"❌ Input tidak valid: {e}\n\nKetik /cancel untuk batal.",
                     parse_mode='Markdown'
                 )
             return

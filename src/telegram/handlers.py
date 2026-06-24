@@ -109,7 +109,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /cancel command"""
-    # Clear any awaiting states
+    # Clear all awaiting states
     context.user_data.pop('awaiting_keyword', None)
     context.user_data.pop('awaiting_keyword_remove', None)
     context.user_data.pop('awaiting_link_url', None)
@@ -119,6 +119,7 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop('awaiting_account_age', None)
     context.user_data.pop('awaiting_account_limit', None)
     context.user_data.pop('temp_account_id', None)
+    context.user_data.pop('awaiting_setting', None)  # NEW: Clear setting state
     
     await update.message.reply_text(
         "✅ *Operasi dibatalkan*\n\n"
