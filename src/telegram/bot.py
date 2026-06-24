@@ -55,6 +55,9 @@ class TelegramBot:
                 InlineKeyboardButton("🔑 Keywords", callback_data="keywords"),
             ],
             [
+                InlineKeyboardButton("👥 Groups", callback_data="groups"),
+            ],
+            [
                 InlineKeyboardButton("📝 Templates", callback_data="templates"),
                 InlineKeyboardButton("⚙️ Settings", callback_data="settings"),
             ],
@@ -308,6 +311,82 @@ class TelegramBot:
                 "Ketik /cancel untuk batal.",
                 parse_mode='Markdown'
             )
+        elif data == "groups":
+            # Get monitored groups from database
+            groups = []
+            if hasattr(self, 'db') and self.db:
+                groups = self.db.get_monitored_groups()
+            
+            if groups:
+                group_list = "\n".join([
+                    f"{i+1}. {g['name'] or g['url']}"
+                    for i, g in enumerate(groups)
+                ])
+                
+                keyboard = [
+                    [InlineKeyboardButton("➕ Add Group", callback_data="group_add")],
+                    [InlineKeyboardButton("➖ Remove Group", callback_data="group_remove")],
+                    [InlineKeyboardButton("🔙 Kembali", callback_data="start")],
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    f"👥 *Monitored Groups* ({len(groups)} groups)\n\n"
+                    f"{group_list}\n\n"
+                    f"Bot akan scan semua group ini untuk mencari postingan dengan keyword monitoring.\n\n"
+                    f"Pilih aksi di bawah:",
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+            else:
+                keyboard = [
+                    [InlineKeyboardButton("➕ Add Group", callback_data="group_add")],
+                    [InlineKeyboardButton("🔙 Kembali", callback_data="start")],
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    "👥 *Monitored Groups*\n\n"
+                    "Belum ada group yang dimonitor.\n\n"
+                    "Tambahkan group Facebook untuk mulai scanning postingan dari group tersebut.\n\n"
+                    "Klik tombol di bawah untuk menambah group.",
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+        elif data == "group_add":
+            context.user_data['awaiting_group_url'] = True
+            await query.edit_message_text(
+                "➕ *Add Monitored Group*\n\n"
+                "Kirim **URL Facebook Group**:\n\n"
+                "Contoh:\n"
+                "- `https://www.facebook.com/groups/jualbelishopee/`\n"
+                "- `https://m.facebook.com/groups/123456789/`\n\n"
+                "Ketik /cancel untuk batal.",
+                parse_mode='Markdown'
+            )
+        elif data == "group_remove":
+            groups = self.db.get_monitored_groups() if hasattr(self, 'db') else []
+            
+            if groups:
+                group_list = "\n".join([
+                    f"{i+1}. {g['name'] or g['url']}"
+                    for i, g in enumerate(groups)
+                ])
+                
+                context.user_data['awaiting_group_remove'] = True
+                
+                await query.edit_message_text(
+                    f"➖ *Remove Group*\n\n"
+                    f"Ketik **nomor** group yang mau dihapus:\n\n"
+                    f"{group_list}\n\n"
+                    "Ketik /cancel untuk batal.",
+                    parse_mode='Markdown'
+                )
+            else:
+                await query.edit_message_text(
+                    "❌ Belum ada group untuk dihapus.",
+                    parse_mode='Markdown'
+                )
         elif data == "settings":
             # Show current settings
             settings_dict = self.settings.get_all_settings_dict()
@@ -576,6 +655,71 @@ class TelegramBot:
             except ValueError as e:
                 await update.message.reply_text(
                     f"❌ Input tidak valid: {e}\n\nKetik /cancel untuk batal.",
+                    parse_mode='Markdown'
+                )
+            return
+        
+        # Check if user is adding a group
+        if context.user_data.get('awaiting_group_url'):
+            context.user_data.pop('awaiting_group_url', None)
+            
+            # Validate Facebook group URL
+            if 'facebook.com' not in text or 'groups' not in text:
+                await update.message.reply_text(
+                    "❌ URL tidak valid! Pastikan URL Facebook Group.\n\n"
+                    "Contoh: `https://www.facebook.com/groups/jualbelishopee/`\n\n"
+                    "Ketik /cancel untuk batal.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Normalize URL
+            url = text.strip()
+            if "www.facebook.com" in url:
+                url = url.replace("www.facebook.com", "m.facebook.com")
+            
+            # Add to database
+            if hasattr(self, 'db'):
+                if self.db.add_monitored_group(url):
+                    await update.message.reply_text(
+                        f"✅ Group berhasil ditambahkan!\n\n"
+                        f"URL: `{url}`\n\n"
+                        "Bot akan mulai scanning group ini.",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text(
+                        "ℹ️ Group sudah terdaftar sebelumnya.",
+                        parse_mode='Markdown'
+                    )
+            else:
+                await update.message.reply_text("❌ Database tidak tersedia.")
+            return
+        
+        # Check if user is removing a group
+        if context.user_data.get('awaiting_group_remove'):
+            context.user_data.pop('awaiting_group_remove', None)
+            
+            try:
+                group_num = int(text)
+                groups = self.db.get_monitored_groups() if hasattr(self, 'db') else []
+                
+                if 1 <= group_num <= len(groups):
+                    removed_group = groups[group_num - 1]
+                    self.db.remove_monitored_group(removed_group['id'])
+                    
+                    await update.message.reply_text(
+                        f"✅ Group *\"{removed_group['name'] or removed_group['url']}\"* berhasil dihapus!",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"❌ Nomor tidak valid. Ketik angka antara 1-{len(groups)}.",
+                        parse_mode='Markdown'
+                    )
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Input tidak valid. Ketik **nomor** (angka), bukan nama group.",
                     parse_mode='Markdown'
                 )
             return

@@ -210,10 +210,34 @@ class AutoCommenter:
                     await asyncio.sleep(min(seconds_until_midnight, 3600))  # Max wait 1 hour
                     continue
                 
-                # Search for posts
+                # Get list of groups to monitor from database
+                groups = self.db.get_monitored_groups() if hasattr(self.db, 'get_monitored_groups') else []
+                
+                if not groups:
+                    logger.warning("No Facebook groups configured. Add groups via Telegram first.")
+                    await asyncio.sleep(300)  # Wait 5 minutes
+                    continue
+                
+                # Scrape posts from all groups (round-robin)
+                all_posts = []
                 scraper = FacebookScraper(can_comment_account.cookie)
-                posts = await scraper.search_posts(keywords, limit=5)
+                
+                for group in groups:
+                    logger.info(f"Scraping group: {group['url']}")
+                    posts = await scraper.scrape_group_feed(group['url'], limit=10)
+                    
+                    # Filter posts by keywords
+                    for post in posts:
+                        content_lower = post['content'].lower()
+                        if any(kw.lower() in content_lower for kw in keywords):
+                            all_posts.append(post)
+                            logger.info(f"Match found in group {group['url']}: {post['content'][:50]}")
+                    
+                    await asyncio.sleep(2)  # Delay between groups
+                
                 await scraper.close()
+                logger.info(f"Total posts found from all groups: {len(all_posts)}")
+                posts = all_posts
                 
                 # Process each post
                 for post in posts:

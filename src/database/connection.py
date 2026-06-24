@@ -157,6 +157,17 @@ class Database:
             VALUES ('is_warm_mode', 'false')
         """)
         
+        # Monitored Facebook Groups table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS monitored_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL UNIQUE,
+                name TEXT,
+                is_active BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # Insert default keywords
         default_keywords = [
             "mau beli", "cari", "nyari", "butuh", "perlu",
@@ -721,6 +732,44 @@ class Database:
         """, (account_id, today))
         conn.commit()
         conn.close()
+    
+    # Monitored Facebook Groups
+    def add_monitored_group(self, url: str, name: str = None) -> bool:
+        """Add Facebook group to monitor"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO monitored_groups (url, name) VALUES (?, ?)",
+                (url, name or url)
+            )
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            conn.close()
+            return False  # Group already exists
+    
+    def get_monitored_groups(self) -> list:
+        """Get all monitored groups"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM monitored_groups WHERE is_active = 1 ORDER BY id")
+        rows = cursor.fetchall()
+        conn.close()
+        return [{"id": row["id"], "url": row["url"], "name": row["name"]} for row in rows]
+    
+    def remove_monitored_group(self, group_id: int) -> bool:
+        """Remove monitored group (soft delete)"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE monitored_groups SET is_active = 0 WHERE id = ?",
+            (group_id,)
+        )
+        conn.commit()
+        conn.close()
+        return True
     
     # Global bot settings
     def get_bot_setting(self, key: str, default: str = None) -> Optional[str]:

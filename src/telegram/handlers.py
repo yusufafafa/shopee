@@ -119,7 +119,9 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop('awaiting_account_age', None)
     context.user_data.pop('awaiting_account_limit', None)
     context.user_data.pop('temp_account_id', None)
-    context.user_data.pop('awaiting_setting', None)  # NEW: Clear setting state
+    context.user_data.pop('awaiting_setting', None)
+    context.user_data.pop('awaiting_group_url', None)  # NEW
+    context.user_data.pop('awaiting_group_remove', None)  # NEW
     
     await update.message.reply_text(
         "✅ *Operasi dibatalkan*\n\n"
