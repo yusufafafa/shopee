@@ -16,7 +16,7 @@ class FacebookScraper:
         self.base_url = "https://m.facebook.com"
         self.session = None
     
-    async def _get_session(self):
+async def _get_session(self):
         """Get aiohttp session with cookie and mobile headers"""
         if self.session is None:
             try:
@@ -24,13 +24,20 @@ class FacebookScraper:
                 self.session = aiohttp.ClientSession(
                     cookies=self._parse_cookies(self.cookie),
                     headers={
-                        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
+                        # Android Chrome Mobile User-Agent
+                        "User-Agent": "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.5",
+                        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
                         "Accept-Encoding": "gzip, deflate, br",
                         "DNT": "1",
                         "Connection": "keep-alive",
                         "Upgrade-Insecure-Requests": "1",
+                        "Sec-Fetch-Dest": "document",
+                        "Sec-Fetch-Mode": "navigate",
+                        "Sec-Fetch-Site": "none",
+                        "Cache-Control": "max-age=0",
+                        # Force mobile view
+                        "X-Requested-With": "com.android.chrome",
                     }
                 )
             except ImportError:
@@ -55,15 +62,21 @@ class FacebookScraper:
         logger.info("Scraping personal home feed")
         
         try:
-            # Go to mobile home feed
-            async with session.get("https://m.facebook.com") as response:
-                logger.info(f"Home feed response: HTTP {response.status}")
+            # Force mobile homepage with redirect prevention
+            async with session.get("https://m.facebook.com/home.php", allow_redirects=False) as response:
+                logger.info(f"Home feed response: HTTP {response.status}, Location: {response.headers.get('Location', 'N/A')}")
                 
-                if response.status != 200:
+                # If redirected to www, follow it but log warning
+                if response.status == 302 and 'www.facebook.com' in response.headers.get('Location', ''):
+                    logger.warning("Facebook redirected to desktop. Cookie may be from desktop session.")
+                    async with session.get("https://m.facebook.com/home.php") as response:
+                        html = await response.text()
+                elif response.status == 200:
+                    html = await response.text()
+                else:
                     logger.error(f"Failed to access home feed: HTTP {response.status}")
                     return posts
                 
-                html = await response.text()
                 logger.info(f"Feed HTML length: {len(html)} bytes")
                 
                 # Check login
