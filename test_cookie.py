@@ -21,13 +21,32 @@ async def test_cookie():
     
     print("🔍 Testing Facebook cookie...")
     
-    # Get cookie from environment
-    cookie = os.getenv('FB_COOKIE', '')
+    # Try to get cookie from database first
+    cookie = ''
+    try:
+        from src.database.connection import Database
+        db = Database()
+        active_accounts = db.get_active_accounts()
+        
+        if active_accounts:
+            cookie = active_accounts[0].cookie
+            account_name = active_accounts[0].name
+            print(f"✅ Found cookie from database (account: {account_name})")
+        else:
+            print("⚠️  No active accounts in database")
+            print("   Add account via Telegram: /addaccount")
+            return
+    except Exception as e:
+        print(f"⚠️  Could not read from database: {e}")
+        print("   Trying FB_COOKIE from .env...")
+        cookie = os.getenv('FB_COOKIE', '')
+    
     if not cookie:
-        print("❌ FB_COOKIE not found in .env")
+        print("❌ No cookie found")
+        print("   Add account via Telegram: /addaccount")
         return
     
-    print(f"✅ Found cookie ({len(cookie)} chars)")
+    print(f"📝 Cookie length: {len(cookie)} chars")
     
     try:
         p = await async_playwright().start()
